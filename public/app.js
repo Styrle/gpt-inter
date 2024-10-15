@@ -222,7 +222,7 @@ function appendMessage(sender, message, isLoading = false) {
             } else {
                 // Code block part
                 const codeBlock = document.createElement("div");
-                codeBlock.classList.add("code-block-container"); // Wrapper for the code block and copy button
+                codeBlock.classList.add("code-block-container");
 
                 const codeElement = document.createElement("pre");
                 const codeContent = document.createElement("code");
@@ -237,9 +237,9 @@ function appendMessage(sender, message, isLoading = false) {
                 // Bind the copy event right after appending the code
                 codeCopyButton.addEventListener("click", () => {
                     navigator.clipboard.writeText(part.trim()).then(() => {
-                        codeCopyButton.textContent = "done"; // Change icon to a checkmark
+                        codeCopyButton.textContent = "done";
                         setTimeout(() => {
-                            codeCopyButton.textContent = "content_copy"; // Revert icon after a delay
+                            codeCopyButton.textContent = "content_copy";
                         }, 2000);
                     });
                 });
@@ -299,8 +299,8 @@ function appendMessage(sender, message, isLoading = false) {
 
 function generateChatId() {
     const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret';  // Retrieve session secret or set a default
-    const randomNumber = Math.random().toString(36).substr(2, 9);  // Generate a random number for uniqueness
-    return `${sessionSecret}_chat_${randomNumber}`;  // Format: "secret_chat_number"
+    const randomNumber = Math.random().toString(36).substr(2, 9); 
+    return `${sessionSecret}_chat_${randomNumber}`; 
 }
 let selectedImageFile = null;
 

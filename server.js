@@ -21,14 +21,14 @@ const port = 3000;
 const upload = multer({ storage: multer.memoryStorage() });
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY, // Use the API key from environment variables
+    apiKey: process.env.OPENAI_API_KEY,
 });
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret',  // Session secret from environment
+    secret: process.env.SESSION_SECRET || 'defaultSecret',
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: false }  // Set to true if using HTTPS
+    cookie: { secure: false } 
 }));
 
 app.get('/session-secret', (req, res) => {
@@ -160,7 +160,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
 // Endpoint to handle user messages and interact with OpenAI
 app.post('/chat', upload.single('image'), async (req, res) => {
-    const { message, tutorMode } = req.body;  // Removed chatId from req.body
+    const { message, tutorMode } = req.body;
     const file = req.file;
 
     // Retrieve session secret from the session or use a default
@@ -190,7 +190,10 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 id: chatId,
                 title,
                 messages: [],
-                timestamp: new Date().toISOString(),
+                timestamp: new Date().toISOString(), // Chat creation timestamp
+                total_tokens_used: 0,  // Initialize token counter
+                total_interactions: 0, // Initialize interaction counter
+                average_tokens_per_interaction: 0, // Initialize average token usage
             };
         }
 
@@ -198,6 +201,8 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         let messages = chat.messages.slice(-5).map(msg => ({
             role: msg.role,
             content: msg.content,
+            timestamp: msg.timestamp,
+            tokens: msg.tokens // Keep the previous token counts
         }));
 
         // Add system message
@@ -206,6 +211,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             content: tutorMode
                 ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
                 : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
+            timestamp: new Date().toISOString(),
         };
         messages.unshift(systemMessage);
 
@@ -214,6 +220,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             messages.push({
                 role: 'user',
                 content: message,
+                timestamp: new Date().toISOString(),
             });
         }
 
@@ -236,6 +243,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                         },
                     },
                 ],
+                timestamp: new Date().toISOString(),
             });
         }
 
@@ -244,6 +252,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             messages.push({
                 role: 'user',
                 content: `Here is the document content:\n${chat.documentContent}`,
+                timestamp: new Date().toISOString(),
             });
             delete chat.documentContent;  // Remove after processing
         }
@@ -273,13 +282,19 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         const data = await response.json();
         const aiResponse = data.choices[0].message.content;
 
-        console.log('AI Response:', aiResponse);
+        // Token information from the response
+        const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
 
-        // Append new messages to chat history
+        console.log('AI Response:', aiResponse);
+        console.log(`Tokens used - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
+
+        // Append new user messages to chat history
         if (message) {
             chat.messages.push({
                 role: 'user',
                 content: message,
+                timestamp: new Date().toISOString(),
+                tokens: prompt_tokens, // Add input tokens for user message
             });
         }
 
@@ -298,6 +313,8 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                         },
                     },
                 ],
+                timestamp: new Date().toISOString(),
+                tokens: prompt_tokens, // Add input tokens for image message
             });
         }
 
@@ -305,13 +322,28 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             chat.messages.push({
                 role: 'user',
                 content: `Here is the document content:\n${chat.documentContent}`,
+                timestamp: new Date().toISOString(),
+                tokens: prompt_tokens, // Add input tokens for document content
             });
             delete chat.documentContent;  // Remove after processing
         }
 
-        chat.messages.push({ role: 'assistant', content: aiResponse });
+        // Add assistant's message with token count
+        chat.messages.push({
+            role: 'assistant',
+            content: aiResponse,
+            timestamp: new Date().toISOString(),
+            tokens: completion_tokens, // Add output tokens for AI response
+        });
 
-        // Update timestamp
+        // Update overall token usage for the chat session
+        chat.total_tokens_used += total_tokens;  // Accumulate total tokens used
+        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions (one input, one output)
+
+        // Calculate the average tokens per interaction
+        chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
+
+        // Update timestamp for the overall chat
         chat.timestamp = new Date().toISOString();
 
         // Upsert the chat document into Cosmos DB
@@ -320,7 +352,13 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         // Categorize the chat based on timestamp
         const category = categorizeChat(chat.timestamp);
 
-        res.json({ response: aiResponse, chatId, category }); 
+        res.json({ 
+            response: aiResponse, 
+            chatId, 
+            category, 
+            tokens: total_tokens, 
+            average_tokens_per_interaction: chat.average_tokens_per_interaction,  // Return the average in the response
+        });
     } catch (error) {
         console.error('Error processing chat request:', error);
         res.status(500).json({ error: 'Something went wrong with OpenAI' });
