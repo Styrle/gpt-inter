@@ -1,0 +1,476 @@
+
+.container {
+    display: flex;
+    height: 100vh;
+}
+
+.chat-window {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    overflow: hidden; /* Prevent input box from being pushed down */
+}
+
+#chat-box {
+    flex: 1;
+    overflow-y: auto; /* Make only the chat messages scrollable */
+    margin-bottom: 10px; /* Add a bit of space above the input area */
+    padding: 10px;
+}
+
+#chat-input {
+    width: 100%;
+    background-color: #f0f0f0;
+    border: none;
+    resize: none;
+    outline: none;
+    font-family: open sans;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 5px;
+    height: 30px; /* Default height */
+    overflow: hidden; /* Hide overflow initially */
+    transition: height 0.2s ease; /* Smooth height transition */
+}
+
+.input-container {
+    display: flex;
+    align-items: center;
+    border-radius: 50px;
+    background-color: #f0f0f0;
+    padding: 10px;
+    position: relative;
+    bottom: 0;
+    width: 100%;
+    box-sizing: border-box; /* Ensure padding is included in the total width */
+}
+
+.attach-icon {
+    cursor: pointer;
+    font-size: 24px;
+    margin-right: 10px;
+}
+
+#send-btn {
+    margin-left: 10px;
+    padding: 10px;
+    cursor: pointer;
+    font-size: 24px;
+}
+
+.sidebar {
+    width: 250px;
+    background-color: #F7F8F9;
+    transition: width 0.3s ease;
+    position: relative;
+    z-index: 1;
+    padding-top: 50px;
+    overflow-y: auto;
+    
+}
+
+.sidebar.collapsed {
+    width: 0;
+    overflow: hidden;
+}
+
+/* Optional scrollbar styling for WebKit browsers */
+.sidebar::-webkit-scrollbar {
+    width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: #f0f0f0;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background-color: #c0c0c0;
+    border-radius: 4px;
+}
+
+
+.icon-container {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 3;
+}
+
+.collapse-icon, .new-chat-icon, .attach-icon, .tutor-mode-icon {
+    cursor: pointer;
+    font-size: 36px;
+    margin-right: 10px;
+    color: #CBCCCF;
+    background-color: transparent;
+    border: 0;
+}
+
+
+.send-icon {
+    cursor: pointer;
+    font-size: 36px;
+    margin-left: 10px;
+    color: #CBCCCF;
+}
+
+#send-btn.active {
+    color: #005DE8;
+}
+
+.no-bullets {
+    list-style-type: none;
+    padding: 20px;
+    margin: 0;
+    font-family: merriweather ;
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #2b2b2b;
+    margin-bottom: 10px;
+    margin-top: 10px;
+}
+
+.chat-category-list{
+    margin-top: 10px;
+    margin-bottom: 5px;
+    
+}
+ul {
+    padding-left: 0;
+    margin-left: 0;
+}
+
+.chat-item {
+    margin-bottom: 0px;
+    font-family: open sans;
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 400;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 8px;
+    list-style-type: none;
+    margin-left: 0;
+}
+
+
+.chat-item:hover {
+    background-color: #eff0f1;
+}
+
+ul.chat-category-list {
+    padding-left: 0;
+}
+
+.message {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0px;
+    color: #2b2b2b;
+}
+
+.message.user {
+    justify-content: flex-end;
+}
+
+.message.ai {
+    justify-content: flex-start;
+   
+}
+
+.message-content {
+    max-width: 60%;
+    padding: 10px;
+    border-radius: 8px;
+    font-family: open sans;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.message.user .message-content {
+    background-color: #005DE8;
+    text-align: right;
+    color: #ffffff;
+}
+
+.message.ai .message-content {
+    background-color: none;
+    display: flex;
+    
+}
+
+
+.ai-icon {
+    margin-top: 10px;
+    width: 24px;
+    height: 24px;
+    margin-right: 10px;
+}
+
+/* Loading dots animation */
+/* Loading dots animation */
+.loading-dots {
+    margin-top: 10px;
+    display: inline-block;
+    position: relative;
+    width: 36px; /* Increase width for bigger dots */
+    height: 36px; /* Increase height for better alignment */
+    margin-left: 10px; /* Adjust spacing next to K logo */
+    vertical-align: middle; /* Ensure dots align vertically with the SVG */
+}
+
+.loading-dots div {
+    position: absolute;
+    width: 8px; /* Make dots bigger */
+    height: 8px; /* Make dots bigger */
+    background: #005DE8; /* Same as the send button's active color */
+    border-radius: 50%;
+    animation: loading-dots 1.2s infinite ease-in-out;
+}
+
+.loading-dots div:nth-child(1) {
+    left: 0px;
+    animation-delay: -0.24s;
+}
+
+.loading-dots div:nth-child(2) {
+    left: 12px; /* Adjust distance between dots */
+    animation-delay: -0.12s;
+}
+
+.loading-dots div:nth-child(3) {
+    left: 24px; /* Adjust distance between dots */
+    animation-delay: 0;
+}
+
+@keyframes loading-dots {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(0.5);
+    }
+}
+
+
+
+/* Styling for the container of file uploads */
+.file-upload-container {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    background-color: transparent; /* No background color for file uploads */
+    padding: 10px; /* Adjust padding as necessary */
+    border-radius: 8px; /* Optional, to match the general UI */
+    margin-bottom: 10px; /* Space between messages */
+}
+
+.file-upload-container .message-content {
+    background-color: #ffffff; /* White background for uploaded documents */
+    color: #2b2b2b; /* Black or dark text color */
+    padding: 10px;
+    max-width: 60%;
+    text-align: right;
+    display: flex;
+    align-items: center; /* Align the file link and delete button in the center */
+
+}
+
+/* Styling for the file link in the chat */
+.file-link {
+    font-family: open sans;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #005DE8;
+    text-decoration: underline;
+    margin-right: 10px;
+}
+
+/* Styling for the delete button next to the file link */
+.delete-button {
+    cursor: pointer;
+    font-size: 18px;
+    color: #b5b5b6;
+    margin-left: 10px;
+}
+
+.delete-button:hover {
+    color: #ff4d4d; /* Change color on hover for a warning effect */
+}
+
+/* Code block container styling */
+.code-block-container {
+    position: relative;
+    background-color: #f5f5f5;
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 8px;
+    overflow: auto;
+}
+
+/* Code element styling */
+pre {
+    margin: 0;
+    font-family: 'Courier New', monospace;
+}
+
+.code-block-container .code-copy-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    cursor: pointer;
+}
+
+/* Code block itself */
+.code-block-container pre {
+    margin: 0;
+    padding-right: 30px; /* Provide space for the copy button */
+}
+
+/* Copy button inside the code block */
+.code-copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    cursor: pointer;
+    color: #888; /* Initial color */
+    font-size: 18px;
+    transition: color 0.2s;
+}
+
+.code-copy-button:hover {
+    color: #005DE8; /* Hover color */
+}
+
+.code-copy-button:active {
+    color: #005DE8; /* Active color */
+}
+
+/* Entire message copy button container */
+.copy-button-container {
+    margin-top: 8px;
+    display: flex;
+    justify-content: flex-start; /* Left-align the copy button */
+}
+
+/* Copy button for entire message */
+.copy-button {
+    cursor: pointer;
+    color: #888;
+    font-size: 18px;
+    transition: color 0.2s;
+}
+
+.copy-button:hover {
+    color: #005DE8;
+}
+
+.copy-button:active {
+    color: #005DE8;
+}
+
+.welcome-container {
+    text-align: center;
+    padding: 50px;
+    display: none; /* Initially hidden, will be shown via JavaScript */
+}
+
+.welcome-image {
+    width: 80%; /* Use percentage for responsiveness, adjust the value as needed */
+    max-width: 400px; /* Optional: Limit the maximum width for larger screens */
+    height: auto; /* Ensure aspect ratio is maintained */
+    margin-bottom: -20px;
+}
+
+.welcome-container h1 {
+    font-family: merriweather;
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.welcome-container p {
+    font-family: open sans;
+    font-size: 12px;
+    color: #666;
+}
+
+@media (max-width: 768px) {
+    .welcome-container h1 {
+        font-size: 22px; /* Scale down heading for smaller screens */
+    }
+
+
+    .welcome-image {
+        width: 100%; /* Increase image width for smaller screens */
+        
+        
+    }
+}
+
+@media (max-width: 480px) {
+    .welcome-container h1 {
+        font-size: 18px; /* Further reduce heading size for very small screens */
+    }
+
+
+    .welcome-image {
+        width: 100%; /* Make the image fill more of the screen on small devices */
+        
+    }
+}
+
+
+
+#tutor-mode-dropdown {
+    display: none;
+    position: absolute;
+    background-color: #ffffff;
+    min-width: 100px;
+    box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.2);
+    z-index: 1;
+    top: 40px; /* Adjust this to control the vertical spacing from the icon */
+    left: 80%;
+    align-items: center;
+    transform: translateX(-50%); /* Center the dropdown under the icon */
+    border-radius: 10px;
+}
+
+#tutor-mode-dropdown .dropdown-item {
+    color: #646468;
+    background-color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    min-width: 80px;
+    padding: 5px;
+    text-align: left;
+    font-family: open sans;
+    font-weight: 600;
+    font-size: 12px;
+    text-decoration: none;
+    display: block;
+    cursor: pointer;
+    margin: 8px;
+}
+
+#tutor-mode-dropdown .dropdown-item:hover {
+    background-color: #F4F5F7;
+}
+
+/* Hide the checkmark by default */
+.checkmark {
+    display: none;
+    margin-left: 10px;
+    color: #006FBF; /* Adjust this color if needed */
+}
+
+/* Show the checkmark for the active item */
+.active .checkmark {
+    color: #006FBF;
+    display: inline; /* Display the checkmark when active */
+    background-color: #F4F5F7;
+}
