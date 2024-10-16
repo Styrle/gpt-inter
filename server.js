@@ -259,16 +259,16 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 
         // Prepare payload for OpenAI
         const payload = {
-            model: 'gpt-4',
+            model: 'gpt-4o',
             messages: messages,
         };
 
         // Make API call to OpenAI
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openai.apiKey}`,
+                'api-key': process.env.AZURE_OPENAI_API_KEY,
             },
             body: JSON.stringify(payload),
         });

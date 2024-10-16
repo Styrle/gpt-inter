@@ -193,11 +193,11 @@ function appendMessage(sender, message, isLoading = false) {
         let entireMessage = ''; // To store the entire message
 
         // Use a regex to split the content into normal text and code blocks
-        const codeBlockRegex = /```([\s\S]*?)```/g;
+        const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
         parts.forEach((part, index) => {
-            if (index % 2 === 0) {
+            if (index % 3 === 0) {
                 // Regular text part
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
@@ -219,15 +219,27 @@ function appendMessage(sender, message, isLoading = false) {
 
                 messageBody.appendChild(messageText);
                 entireMessage += part.trim();
-            } else {
+            } else if (index % 3 === 1) {
+                // Capture language identifier (e.g., python, javascript)
+                var language = part.trim(); // Extract language from the first part of the regex capture group.
+            } else if (index % 3 === 2) {
                 // Code block part
                 const codeBlock = document.createElement("div");
                 codeBlock.classList.add("code-block-container");
 
                 const codeElement = document.createElement("pre");
                 const codeContent = document.createElement("code");
+
+                // Set the appropriate language class if language was detected
+                if (language) {
+                    codeContent.classList.add(`language-${language}`);
+                }
+
                 codeContent.textContent = part.trim(); // Add code inside <pre><code></code></pre>
                 codeElement.appendChild(codeContent);
+
+                // Initialize Highlight.js for the code block
+                hljs.highlightElement(codeContent);
 
                 // Create copy button for the code block
                 const codeCopyButton = document.createElement("span");
