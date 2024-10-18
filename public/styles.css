@@ -474,3 +474,24 @@ pre {
     display: inline; /* Display the checkmark when active */
     background-color: #F4F5F7;
 }
+
+/* Styling for code blocks */
+.hljs-keyword {
+    color: #a626a4;
+}
+
+.hljs-string {
+    color: #50a14f;
+}
+
+.hljs-title {
+    color: #4078f2;
+}
+
+.hljs-number {
+    color: #986801;
+}
+
+.hljs-attr {
+    color: #986801;
+}

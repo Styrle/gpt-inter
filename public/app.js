@@ -427,8 +427,6 @@ function appendFileLink(fileName, fileUrl) {
     chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
 }
 
-
-
 const sidebar = document.getElementById('sidebar');
 
 function toggleSidebar() {
@@ -500,9 +498,6 @@ function toggleSidebar() {
         }
     }
 });
-
-
-
 
 function streamMessageFromServer() {
     const eventSource = new EventSource('/chat-stream'); // Adjust the endpoint if needed

@@ -422,6 +422,38 @@ app.get('/chats/:chatId', async (req, res) => {
     }
 });
 
+async function deleteOldChats() {
+    try {
+        const querySpec = {
+            query: 'SELECT c.id, c.timestamp FROM c',
+        };
+
+        const { resources: chats } = await container.items.query(querySpec).fetchAll();
+
+        const now = new Date();
+        const ninetyDaysInMillis = 90 * 24 * 60 * 60 * 1000;  // 90 days in milliseconds
+
+        for (const chat of chats) {
+            const chatTimestamp = new Date(chat.timestamp);
+            const ageInMillis = now - chatTimestamp;
+
+            if (ageInMillis > ninetyDaysInMillis) {
+                // Chat is older than 90 days, delete it
+                await container.item(chat.id, chat.id).delete();
+                console.log(`Deleted chat with ID: ${chat.id} because it is older than 90 days.`);
+            }
+        }
+    } catch (error) {
+        console.error('Error deleting old chats:', error);
+    }
+}
+
+// Run the deletion check immediately on server start
+deleteOldChats();
+
+// Schedule the old chat deletion to run every 24 hours
+setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
+
 // Start the server on the specified port
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
