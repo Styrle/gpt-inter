@@ -78,6 +78,7 @@ async function sendMessage(message) {
             message: message, 
             chatId: chatId, 
             tutorMode: isTutorModeOn,
+            blobName: 'your-blob-name',
         }),
     });
     const data = await res.json();
@@ -192,6 +193,16 @@ function appendMessage(sender, message, isLoading = false) {
 
         let entireMessage = ''; // To store the entire message
 
+        // Check for reference pattern in the AI's message
+        const referencePattern = /Source:\s*(.*)/i;
+        let referenceText = '';
+        const referenceMatch = message.match(referencePattern);
+
+        if (referenceMatch) {
+            referenceText = referenceMatch[1].trim();
+            message = message.replace(referencePattern, '').trim();
+        }
+
         // Use a regex to split the content into normal text and code blocks
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
@@ -289,6 +300,14 @@ function appendMessage(sender, message, isLoading = false) {
                     }, 2000);
                 });
             });
+        }
+
+        // If there's a reference, display it
+        if (referenceText) {
+            const referenceElement = document.createElement("div");
+            referenceElement.classList.add("message-reference");
+            referenceElement.textContent = `Source: ${referenceText}`;
+            messageBody.appendChild(referenceElement);
         }
 
         // Add AI icon and message content to the final element

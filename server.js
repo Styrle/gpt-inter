@@ -4,6 +4,7 @@ const multer = require('multer');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { OpenAI } = require('openai');
 const fs = require('fs');
+const { BlobServiceClient } = require('@azure/storage-blob');
 const path = require('path');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -17,6 +18,9 @@ dotenv.config();
 
 const app = express();
 const port = 3000;
+
+// Initialize BlobServiceClient
+const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -42,6 +46,44 @@ const client = new CosmosClient({
     endpoint: process.env.COSMOS_DB_ENDPOINT,
     key: process.env.COSMOS_DB_KEY,
 });
+
+// Helper function to convert stream to string
+async function streamToString(readableStream) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        readableStream.on('data', (data) => {
+            chunks.push(data.toString());
+        });
+        readableStream.on('end', () => {
+            resolve(chunks.join(''));
+        });
+        readableStream.on('error', reject);
+    });
+}
+
+// Function to get blob content
+async function getAllBlobsContent(containerName) {
+    try {
+        const containerClient = blobServiceClient.getContainerClient(containerName);
+        const blobContents = [];
+
+        // List all blobs in the container
+        for await (const blob of containerClient.listBlobsFlat()) {
+            const blobClient = containerClient.getBlobClient(blob.name);
+            const downloadBlockBlobResponse = await blobClient.download(0);
+            const content = await streamToString(downloadBlockBlobResponse.readableStreamBody);
+            blobContents.push({
+                name: blob.name,
+                content: content,
+            });
+        }
+
+        return blobContents;
+    } catch (error) {
+        console.error(`Error retrieving blobs from container "${containerName}":`, error);
+        throw new Error('Failed to retrieve data from Azure Blob Storage.');
+    }
+}
 
 // Get a reference to the database and container
 const database = client.database(process.env.COSMOS_DB_DATABASE_ID);
@@ -205,14 +247,57 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             tokens: msg.tokens // Keep the previous token counts
         }));
 
+        // Handle document content if it exists in chat
+        if (chat.documentContent) {
+            messages.push({
+                role: 'user',
+                content: `Here is the document content:\n${chat.documentContent}`,
+                timestamp: new Date().toISOString(),
+            });
+            delete chat.documentContent;  // Remove after processing
+        }
+
+        // Retrieve data from Blob Storage (all blobs in the container)
+        const containerName = 'fileupload-trainingdata'; // Replace with your container name
+
+        // Fetch content of all blobs in the container
+        const blobContents = await getAllBlobsContent(containerName);
+
+        // Add console logs for debugging
+        console.log(`Fetched content of all blobs in container "${containerName}":`);
+        blobContents.forEach(blob => {
+            console.log(`Blob Name: ${blob.name}`);
+            console.log(`Content:\n${blob.content}`);
+        });
+
+        // Limit the content to avoid exceeding token limits
+        const MAX_BLOB_CONTENT_LENGTH = 1000; // Adjust as needed
+
+        // Truncate blob contents if necessary
+        let aggregatedBlobContent = blobContents.map(blob => {
+            let content = blob.content;
+            if (content.length > MAX_BLOB_CONTENT_LENGTH) {
+                content = content.substring(0, MAX_BLOB_CONTENT_LENGTH) + '... [Content truncated]';
+            }
+            return `---\nBlob Name: ${blob.name}\nContent:\n${content}\n---`;
+        }).join('\n');
+
         // Add system message
+        const systemMessageContent = tutorMode
+            ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
+            : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.';
+
+        // Include blob content reference
         const systemMessage = {
             role: 'system',
-            content: tutorMode
-                ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-                : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
+            content: `${systemMessageContent}\nNote that the following data is sourced from Azure Blob Storage:\n${aggregatedBlobContent}`,
             timestamp: new Date().toISOString(),
         };
+
+        // Log the system message content
+        console.log('System Message Content:');
+        console.log(systemMessage.content);
+
         messages.unshift(systemMessage);
 
         // Add user message if present
@@ -247,19 +332,9 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             });
         }
 
-        // Handle document content if it exists in chat
-        if (chat.documentContent) {
-            messages.push({
-                role: 'user',
-                content: `Here is the document content:\n${chat.documentContent}`,
-                timestamp: new Date().toISOString(),
-            });
-            delete chat.documentContent;  // Remove after processing
-        }
-
         // Prepare payload for OpenAI
         const payload = {
-            model: 'gpt-4o',
+            model: 'gpt-4',
             messages: messages,
         };
 
@@ -318,16 +393,6 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             });
         }
 
-        if (chat.documentContent) {
-            chat.messages.push({
-                role: 'user',
-                content: `Here is the document content:\n${chat.documentContent}`,
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens, // Add input tokens for document content
-            });
-            delete chat.documentContent;  // Remove after processing
-        }
-
         // Add assistant's message with token count
         chat.messages.push({
             role: 'assistant',
@@ -338,7 +403,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 
         // Update overall token usage for the chat session
         chat.total_tokens_used += total_tokens;  // Accumulate total tokens used
-        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions (one input, one output)
+        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions
 
         // Calculate the average tokens per interaction
         chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
@@ -352,12 +417,12 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         // Categorize the chat based on timestamp
         const category = categorizeChat(chat.timestamp);
 
-        res.json({ 
-            response: aiResponse, 
-            chatId, 
-            category, 
-            tokens: total_tokens, 
-            average_tokens_per_interaction: chat.average_tokens_per_interaction,  // Return the average in the response
+        res.json({
+            response: aiResponse,
+            chatId,
+            category,
+            tokens: total_tokens,
+            average_tokens_per_interaction: chat.average_tokens_per_interaction,
         });
     } catch (error) {
         console.error('Error processing chat request:', error);
