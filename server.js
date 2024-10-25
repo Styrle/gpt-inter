@@ -4,7 +4,6 @@ const multer = require('multer');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { OpenAI } = require('openai');
 const fs = require('fs');
-const { BlobServiceClient } = require('@azure/storage-blob');
 const path = require('path');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -18,9 +17,6 @@ dotenv.config();
 
 const app = express();
 const port = 3000;
-
-// Initialize BlobServiceClient
-const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -47,48 +43,110 @@ const client = new CosmosClient({
     key: process.env.COSMOS_DB_KEY,
 });
 
-// Helper function to convert stream to string
-async function streamToString(readableStream) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        readableStream.on('data', (data) => {
-            chunks.push(data.toString());
-        });
-        readableStream.on('end', () => {
-            resolve(chunks.join(''));
-        });
-        readableStream.on('error', reject);
-    });
-}
-
-// Function to get blob content
-async function getAllBlobsContent(containerName) {
-    try {
-        const containerClient = blobServiceClient.getContainerClient(containerName);
-        const blobContents = [];
-
-        // List all blobs in the container
-        for await (const blob of containerClient.listBlobsFlat()) {
-            const blobClient = containerClient.getBlobClient(blob.name);
-            const downloadBlockBlobResponse = await blobClient.download(0);
-            const content = await streamToString(downloadBlockBlobResponse.readableStreamBody);
-            blobContents.push({
-                name: blob.name,
-                content: content,
-            });
-        }
-
-        return blobContents;
-    } catch (error) {
-        console.error(`Error retrieving blobs from container "${containerName}":`, error);
-        throw new Error('Failed to retrieve data from Azure Blob Storage.');
-    }
-}
-
 // Get a reference to the database and container
 const database = client.database(process.env.COSMOS_DB_DATABASE_ID);
 const container = database.container(process.env.COSMOS_DB_CONTAINER_ID);
 
+// Function to index document into AI Search
+async function indexDocumentToAISearch(document) {
+    const aiSearchApiUrl = process.env.AI_SEARCH_API_URL;
+    const aiSearchApiKey = process.env.AI_SEARCH_API_KEY;
+    const indexName = process.env.AI_SEARCH_INDEX_NAME;
+    const apiVersion = process.env.AI_SEARCH_API_VERSION || '2021-04-30-Preview';
+
+    if (!aiSearchApiUrl || !aiSearchApiKey || !indexName) {
+        throw new Error('AI Search API URL, API Key, or Index Name is not set in environment variables.');
+    }
+
+    const indexEndpoint = `${aiSearchApiUrl}/indexes/${encodeURIComponent(indexName)}/docs/index?api-version=${apiVersion}`;
+
+    const requestBody = {
+        value: [document],
+    };
+
+    try {
+        const response = await fetch(indexEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'api-key': aiSearchApiKey,
+            },
+            body: JSON.stringify(requestBody),
+        });
+
+        console.log(`Azure Cognitive Search Indexing Response Status: ${response.status}`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Azure Cognitive Search Indexing API Error Response: ${errorText}`);
+            throw new Error(`AI Search Indexing Error: ${errorText}`);
+        }
+
+        const results = await response.json();
+        console.log(`Azure Cognitive Search Indexing Results: ${JSON.stringify(results)}`);
+
+        return results;
+    } catch (error) {
+        console.error(`Error during Azure Cognitive Search Indexing API call: ${error.message}`);
+        throw new Error(`AI Search Indexing Error: ${error.message}`);
+    }
+}
+
+// Function to search documents in AI Search
+async function searchAI(text) {
+    const aiSearchApiUrl = process.env.AI_SEARCH_API_URL;
+    const aiSearchApiKey = process.env.AI_SEARCH_API_KEY;
+    const indexName = process.env.AI_SEARCH_INDEX_NAME;
+    const apiVersion = process.env.AI_SEARCH_API_VERSION || '2021-04-30-Preview';
+
+    if (!aiSearchApiUrl || !aiSearchApiKey || !indexName) {
+        throw new Error('AI Search API URL, API Key, or Index Name is not set in environment variables.');
+    }
+
+    const searchEndpoint = `${aiSearchApiUrl}/indexes/${encodeURIComponent(indexName)}/docs/search?api-version=${apiVersion}`;
+
+    console.log(`Querying Azure Cognitive Search at: ${searchEndpoint}`);
+
+    const requestBody = {
+        search: text,
+        select: "chunk_id, chunk", // Adjust fields based on your index schema
+        top: 10,
+    };
+
+    try {
+        const response = await fetch(searchEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'api-key': aiSearchApiKey,
+            },
+            body: JSON.stringify(requestBody),
+        });
+
+        console.log(`Azure Cognitive Search Response Status: ${response.status}`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Azure Cognitive Search API Error Response: ${errorText}`);
+            throw new Error(`AI Search Query Error: ${errorText}`);
+        }
+
+        const results = await response.json();
+        console.log(`Azure Cognitive Search Results: ${JSON.stringify(results)}`);
+
+        if (!results.value) {
+            console.warn('Azure Cognitive Search response does not contain "value" field.');
+            return [];
+        }
+
+        return results.value; // Azure Cognitive Search returns results under 'value' key
+    } catch (error) {
+        console.error(`Error during Azure Cognitive Search API call: ${error.message}`);
+        throw new Error(`AI Search Query Error: ${error.message}`);
+    }
+}
+
+// Function to get chat history
 async function getChatHistory(chatId) {
     try {
         const { resource: chat } = await container.item(chatId, chatId).read();
@@ -175,6 +233,23 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 return res.status(400).json({ error: 'Unsupported file type.' });
             }
 
+            // Index the extracted text into AI Search
+            const document = {
+                chunk_id: `${chatId}_${Date.now()}`, // Unique ID as per index schema
+                chunk: extractedText, // Content of the document
+                title: file.originalname, // Title can be the original file name or another relevant identifier
+                parent_id: chatId, // Associating the document with the chat session
+                // text_vector: <Generate or omit based on your index requirements>,
+                metadata: {
+                    originalFileName: file.originalname,
+                    mimeType: file.mimetype,
+                    uploadedAt: new Date().toISOString(),
+                    chatId: chatId,
+                },
+            };
+
+            await indexDocumentToAISearch(document);
+
             let chat = await getChatHistory(chatId);
 
             if (!chat) {
@@ -186,8 +261,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 };
             }
 
-            // Store the extracted text in the chat document
-            chat.documentContent = extractedText;
+            // Optionally, store reference to the indexed document in chat
+            if (!chat.indexedDocuments) {
+                chat.indexedDocuments = [];
+            }
+            chat.indexedDocuments.push(document.id);
 
             // Upsert the chat document
             await upsertChatHistory(chat);
@@ -257,40 +335,32 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             delete chat.documentContent;  // Remove after processing
         }
 
-        // Retrieve data from Blob Storage (all blobs in the container)
-        const containerName = 'fileupload-trainingdata'; // Replace with your container name
+        // Query AI Search for relevant documents based on the user's message
+        let relevantDocuments = [];
+        if (message) {
+            relevantDocuments = await searchAI(message);
+        }
 
-        // Fetch content of all blobs in the container
-        const blobContents = await getAllBlobsContent(containerName);
-
-        // Add console logs for debugging
-        console.log(`Fetched content of all blobs in container "${containerName}":`);
-        blobContents.forEach(blob => {
-            console.log(`Blob Name: ${blob.name}`);
-            console.log(`Content:\n${blob.content}`);
-        });
-
-        // Limit the content to avoid exceeding token limits
-        const MAX_BLOB_CONTENT_LENGTH = 1000; // Adjust as needed
-
-        // Truncate blob contents if necessary
-        let aggregatedBlobContent = blobContents.map(blob => {
-            let content = blob.content;
-            if (content.length > MAX_BLOB_CONTENT_LENGTH) {
-                content = content.substring(0, MAX_BLOB_CONTENT_LENGTH) + '... [Content truncated]';
+        // Aggregate the content from relevant documents
+        const aggregatedDocumentContent = relevantDocuments.map(doc => {
+            let content = doc.chunk; // Use 'chunk' instead of 'content'
+            const MAX_CONTENT_LENGTH = 1000; // Adjust as needed
+        
+            if (content.length > MAX_CONTENT_LENGTH) {
+                content = content.substring(0, MAX_CONTENT_LENGTH) + '... [Content truncated]';
             }
-            return `---\nBlob Name: ${blob.name}\nContent:\n${content}\n---`;
+        
+            return `---\nDocument ID: ${doc.chunk_id}\nContent:\n${content}\n---`;
         }).join('\n');
 
-        // Add system message
+        // Add system message with AI Search results
         const systemMessageContent = tutorMode
             ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-            : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.';
+            : 'You are an assistant that can recall information from the provided documents to answer the user\'s queries.';
 
-        // Include blob content reference
         const systemMessage = {
             role: 'system',
-            content: `${systemMessageContent}\nNote that the following data is sourced from Azure Blob Storage:\n${aggregatedBlobContent}`,
+            content: `${systemMessageContent}\nNote that the following data is sourced from the AI Search system:\n${aggregatedDocumentContent}`,
             timestamp: new Date().toISOString(),
         };
 
