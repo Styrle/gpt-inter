@@ -11,6 +11,7 @@ const xlsx = require('xlsx');
 const tesseract = require('tesseract.js');
 const { CosmosClient } = require("@azure/cosmos");
 const dotenv = require('dotenv');
+const helmet = require('helmet');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -42,6 +43,15 @@ const client = new CosmosClient({
     endpoint: process.env.COSMOS_DB_ENDPOINT,
     key: process.env.COSMOS_DB_KEY,
 });
+
+app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'", "chrome-extension:"],
+        scriptSrc: ["'self'", "chrome-extension:"],
+      },
+    },
+  }));
 
 // Get a reference to the database and container
 const database = client.database(process.env.COSMOS_DB_DATABASE_ID);
@@ -194,6 +204,8 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 total_tokens_used: 0,  // Initialize token counter
                 total_interactions: 0, // Initialize interaction counter
                 average_tokens_per_interaction: 0, // Initialize average token usage
+                total_image_count: 0, // Initialize image count
+                total_image_size: 0, // Initialize total image size
             };
         }
 
@@ -215,8 +227,8 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         };
         messages.unshift(systemMessage);
 
-        // Add user message if present
-        if (message) {
+        // Add user message if present and not an image
+        if (message && (!file || !file.mimetype.startsWith('image/'))) {
             messages.push({
                 role: 'user',
                 content: message,
@@ -244,6 +256,29 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                     },
                 ],
                 timestamp: new Date().toISOString(),
+            });
+
+            // Initialize image tracking fields if they don't exist
+            if (!chat.total_image_count) {
+                chat.total_image_count = 0;
+            }
+            if (!chat.total_image_size) {
+                chat.total_image_size = 0;
+            }
+
+            // Increment the image count
+            chat.total_image_count += 1;
+
+            // Add the image size to the total
+            chat.total_image_size += file.size;
+
+            // Optionally, you can store the size of the individual image in the message history if needed
+            chat.messages.push({
+                role: 'user',
+                content: message || 'Sent an image',
+                timestamp: new Date().toISOString(),
+                tokens: 0, // Assuming no tokens for image message
+                imageSize: file.size, // Store individual image size
             });
         }
 
@@ -288,8 +323,8 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         console.log('AI Response:', aiResponse);
         console.log(`Tokens used - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
 
-        // Append new user messages to chat history
-        if (message) {
+        // Append new user messages to chat history without image data
+        if (message && (!file || !file.mimetype.startsWith('image/'))) {
             chat.messages.push({
                 role: 'user',
                 content: message,
@@ -299,31 +334,22 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         }
 
         if (file && file.mimetype.startsWith('image/')) {
+            // Do not include image data in chat history
             chat.messages.push({
                 role: 'user',
-                content: [
-                    {
-                        "type": "text",
-                        "text": message || 'Please analyze the following image:',
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": imageUrl,
-                        },
-                    },
-                ],
+                content: message || 'Sent an image',
                 timestamp: new Date().toISOString(),
                 tokens: prompt_tokens, // Add input tokens for image message
             });
         }
 
         if (chat.documentContent) {
+            // Optionally, include a placeholder message
             chat.messages.push({
                 role: 'user',
-                content: `Here is the document content:\n${chat.documentContent}`,
+                content: 'Uploaded a document',
                 timestamp: new Date().toISOString(),
-                tokens: prompt_tokens, // Add input tokens for document content
+                tokens: prompt_tokens,
             });
             delete chat.documentContent;  // Remove after processing
         }
@@ -338,7 +364,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 
         // Update overall token usage for the chat session
         chat.total_tokens_used += total_tokens;  // Accumulate total tokens used
-        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions (one input, one output)
+        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions
 
         // Calculate the average tokens per interaction
         chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
@@ -357,7 +383,9 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             chatId, 
             category, 
             tokens: total_tokens, 
-            average_tokens_per_interaction: chat.average_tokens_per_interaction,  // Return the average in the response
+            average_tokens_per_interaction: chat.average_tokens_per_interaction,
+            total_image_count: chat.total_image_count,
+            total_image_size: chat.total_image_size,
         });
     } catch (error) {
         console.error('Error processing chat request:', error);
