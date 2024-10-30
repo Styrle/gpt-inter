@@ -172,7 +172,7 @@ newChatBtn.addEventListener('click', () => {
 });
 
 
-function appendMessage(sender, message, isLoading = false) {
+function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const chatBox = document.getElementById("chat-box");
     const messageElement = document.createElement("div");
     messageElement.classList.add("message", sender === "You" ? "user" : "ai");
@@ -295,11 +295,26 @@ function appendMessage(sender, message, isLoading = false) {
         messageContent.appendChild(aiIcon);
         messageContent.appendChild(messageBody);
     } else if (sender === "You") {
-        // User message
-        const messageText = document.createElement("div");
-        messageText.classList.add("message-text");
-        messageText.textContent = message;
-        messageContent.appendChild(messageText);
+        // User message handling with image support
+        const messageBody = document.createElement("div");
+        messageBody.classList.add("message-body");
+
+        if (message) {
+            const messageText = document.createElement("div");
+            messageText.classList.add("message-text");
+            messageText.textContent = message;
+            messageBody.appendChild(messageText);
+        }
+
+        if (imageFile) {
+            const imageElement = document.createElement("img");
+            imageElement.src = URL.createObjectURL(imageFile);
+            imageElement.alt = "Uploaded Image";
+            imageElement.classList.add("uploaded-image");
+            messageBody.appendChild(imageElement);
+        }
+
+        messageContent.appendChild(messageBody);
     }
 
     messageElement.appendChild(messageContent);
@@ -455,18 +470,14 @@ function toggleSidebar() {
             isFirstInteraction = false; // Mark that the first interaction is done
         }
 
-        // Append the user's message to the chat
-        if (message) {
-            appendMessage('You', message);
-        } else {
-            appendMessage('You', ''); // If no text message, still show an empty message bubble
-        }
+        // Append the user's message to the chat, including the image if any
+        appendMessage('You', message, selectedImageFile);
 
         chatInput.value = ''; // Clear the input value
         sendBtn.classList.remove('active'); // Reset button state
 
         // Append an empty message with loading dots for AI response
-        const loadingMessageElement = appendMessage('AI', '', true);
+        const loadingMessageElement = appendMessage('AI', '', null, true);
 
         try {
             let response;
@@ -765,7 +776,26 @@ function hideWelcomeScreen() {
     welcomeContainer.style.display = 'none'; // Hide the welcome screen
 }
 
-// Function to handle sending message with optional image
+function updateImageStats(totalCount, totalSize) {
+    const imageStatsElement = document.getElementById('image-stats');
+
+    if (imageStatsElement) {
+        imageStatsElement.textContent = `Total Images: ${totalCount}, Total Size: ${formatBytes(totalSize)}`;
+    }
+}
+
+// Helper function to format bytes into a human-readable format
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
 // Function to handle sending message with optional image
 async function sendMessageWithImage(message, imageFile) {
     const formData = new FormData();
@@ -783,6 +813,14 @@ async function sendMessageWithImage(message, imageFile) {
     });
 
     const data = await res.json();
+
+    // You can access total_image_count and total_image_size here
+    console.log('Total Images:', data.total_image_count);
+    console.log('Total Image Size:', data.total_image_size);
+
+    // Optionally, update the UI with this information
+    updateImageStats(data.total_image_count, data.total_image_size);
+
     return data.response;
 }
 
