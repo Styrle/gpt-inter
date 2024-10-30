@@ -49,10 +49,9 @@ jobs:
         run: unzip release.zip
       
       - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
           app-name: 'KaplanGPT'
           slot-name: 'production'
-          package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_1FA4F3AAA06F491BB8EB9AFEAB3DB016 }}
+          package: .
