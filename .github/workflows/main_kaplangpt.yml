@@ -54,6 +54,7 @@ jobs:
         uses: azure/webapps-deploy@v2
         with:
           app-name: 'KaplanGPT'
-          slot-name: 'production'
+          # Remove or comment out the slot-name line
+          # slot-name: 'production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_1FA4F3AAA06F491BB8EB9AFEAB3DB016 }}
-          package: .
+          package: '.'
