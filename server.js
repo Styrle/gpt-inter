@@ -17,7 +17,7 @@ const helmet = require('helmet');
 dotenv.config();
 
 const app = express();
-const port = 3000;
+const port = 8080;
 
 const upload = multer({ storage: multer.memoryStorage() });
 
