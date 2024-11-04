@@ -47,7 +47,7 @@ jobs:
         with:
           name: node-app
 
-      - name: 'Unzip artifact'
+      - name: Unzip artifact for deployment
         run: unzip release.zip
       
       - name: 'Deploy to Azure Web App'
@@ -56,5 +56,5 @@ jobs:
         with:
           app-name: 'KaplanGPT'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_ADBA7B062FA04F1C989BDAEBD2BA0531 }}
           package: .
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_8030D08B9E3B45C1B532111E865012DF }}
