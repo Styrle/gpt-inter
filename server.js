@@ -22,7 +22,7 @@ const port = 3000;
 const upload = multer({ storage: multer.memoryStorage() });
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
 });
 
 app.use(session({
