@@ -105,6 +105,58 @@ function categorizeChat(timestamp) {
     }
 }
 
+async function getEmbedding(text) {
+    const embeddingResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME}/embeddings?api-version=${process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_VERSION}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'api-key': process.env.AZURE_OPENAI_API_KEY,
+        },
+        body: JSON.stringify({
+            input: text,
+        }),
+    });
+
+    if (!embeddingResponse.ok) {
+        const errorText = await embeddingResponse.text();
+        console.error('Error from OpenAI Embedding API:', errorText);
+        throw new Error(`Error: ${embeddingResponse.statusText}`);
+    }
+
+    const embeddingData = await embeddingResponse.json();
+    return embeddingData.data[0].embedding; // Returns the embedding array
+}
+
+// Function to calculate cosine similarity between two vectors
+function cosineSimilarity(vecA, vecB) {
+    const dotProduct = vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);
+    const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
+    const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
+    return dotProduct / (magnitudeA * magnitudeB);
+}
+
+// Function to split text into chunks
+function splitTextIntoChunks(text, maxChunkSize) {
+    const words = text.split(/\s+/);
+    const chunks = [];
+    let currentChunk = '';
+
+    for (const word of words) {
+        if ((currentChunk + ' ' + word).length > maxChunkSize) {
+            chunks.push(currentChunk.trim());
+            currentChunk = word;
+        } else {
+            currentChunk += ' ' + word;
+        }
+    }
+
+    if (currentChunk) {
+        chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
+}
+
 // Endpoint to handle file uploads and extract content
 app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
@@ -143,6 +195,21 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 return res.status(400).json({ error: 'Unsupported file type.' });
             }
 
+            // Split the extracted text into chunks
+            const maxChunkSize = 500; // Adjust as needed
+            const textChunks = splitTextIntoChunks(extractedText, maxChunkSize);
+
+            // For each chunk, compute the embedding
+            const chunkEmbeddings = [];
+            for (const chunk of textChunks) {
+                const embedding = await getEmbedding(chunk);
+                chunkEmbeddings.push({
+                    content: chunk,
+                    embedding: embedding,
+                });
+            }
+
+            // Retrieve or create the chat object
             let chat = await getChatHistory(chatId);
 
             if (!chat) {
@@ -154,8 +221,8 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 };
             }
 
-            // Store the extracted text in the chat document
-            chat.documentContent = extractedText;
+            // Store the embeddings and chunks in the chat document
+            chat.documentEmbeddings = chunkEmbeddings;
 
             // Upsert the chat document
             await upsertChatHistory(chat);
@@ -210,12 +277,19 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         }
 
         // Build messages array from existing chat history
-        let messages = chat.messages.slice(-5).map(msg => ({
+        let previousMessages = chat.messages || [];
+
+        // **Include the last N messages from the chat history**
+        const N = 20;
+        const recentMessages = previousMessages.slice(-N).map(msg => ({
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp,
-            tokens: msg.tokens // Keep the previous token counts
+            tokens: msg.tokens, // Keep the previous token counts
         }));
+
+        // Build the messages array to send to OpenAI
+        let messages = [];
 
         // Add system message
         const systemMessage = {
@@ -225,7 +299,47 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
             timestamp: new Date().toISOString(),
         };
-        messages.unshift(systemMessage);
+        messages.push(systemMessage);
+
+        // **Add recent messages to maintain context**
+        messages = messages.concat(recentMessages);
+
+        // Handle document embeddings
+        // If the chat has document embeddings, compute similarities
+        let documentSimilarities = [];
+        if (chat.documentEmbeddings && chat.documentEmbeddings.length > 0) {
+            // Compute the embedding of the user's message if present
+            let userMessageEmbedding = null;
+            if (message && (!file || !file.mimetype.startsWith('image/'))) {
+                userMessageEmbedding = await getEmbedding(message);
+            }
+
+            if (userMessageEmbedding) {
+                documentSimilarities = chat.documentEmbeddings.map(docChunk => {
+                    return {
+                        content: docChunk.content,
+                        similarity: cosineSimilarity(userMessageEmbedding, docChunk.embedding),
+                    };
+                });
+
+                // Sort the document chunks by similarity
+                documentSimilarities.sort((a, b) => b.similarity - a.similarity);
+            }
+
+            // If there are relevant document chunks, include them
+            if (documentSimilarities.length > 0) {
+                const M = 3; // Number of top document chunks
+                const topSimilarDocs = documentSimilarities.slice(0, M).map(item => item.content);
+
+                for (const docContent of topSimilarDocs) {
+                    messages.push({
+                        role: 'system',
+                        content: `Relevant document content:\n${docContent}`,
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            }
+        }
 
         // Add user message if present and not an image
         if (message && (!file || !file.mimetype.startsWith('image/'))) {
@@ -272,7 +386,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             // Add the image size to the total
             chat.total_image_size += file.size;
 
-            // Optionally, you can store the size of the individual image in the message history if needed
+            // Optionally, store the size of the individual image in the message history if needed
             chat.messages.push({
                 role: 'user',
                 content: message || 'Sent an image',
@@ -280,16 +394,6 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 tokens: 0, // Assuming no tokens for image message
                 imageSize: file.size, // Store individual image size
             });
-        }
-
-        // Handle document content if it exists in chat
-        if (chat.documentContent) {
-            messages.push({
-                role: 'user',
-                content: `Here is the document content:\n${chat.documentContent}`,
-                timestamp: new Date().toISOString(),
-            });
-            delete chat.documentContent;  // Remove after processing
         }
 
         // Prepare payload for OpenAI
@@ -323,13 +427,14 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         console.log('AI Response:', aiResponse);
         console.log(`Tokens used - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
 
-        // Append new user messages to chat history without image data
+        // Append new user messages to chat history
         if (message && (!file || !file.mimetype.startsWith('image/'))) {
             chat.messages.push({
                 role: 'user',
                 content: message,
                 timestamp: new Date().toISOString(),
                 tokens: prompt_tokens, // Add input tokens for user message
+                // embedding: userMessageEmbedding, // Optionally store the embedding
             });
         }
 
@@ -341,17 +446,6 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 timestamp: new Date().toISOString(),
                 tokens: prompt_tokens, // Add input tokens for image message
             });
-        }
-
-        if (chat.documentContent) {
-            // Optionally, include a placeholder message
-            chat.messages.push({
-                role: 'user',
-                content: 'Uploaded a document',
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens,
-            });
-            delete chat.documentContent;  // Remove after processing
         }
 
         // Add assistant's message with token count
@@ -372,7 +466,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         // Update timestamp for the overall chat
         chat.timestamp = new Date().toISOString();
 
-        // Upsert the chat document into Cosmos DB
+        // **Upsert the chat document into Cosmos DB**
         await upsertChatHistory(chat);
 
         // Categorize the chat based on timestamp
@@ -392,6 +486,32 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         res.status(500).json({ error: 'Something went wrong with OpenAI' });
     }
 });
+
+// Helper function to retrieve chat history from Cosmos DB
+async function getChatHistory(chatId) {
+    try {
+        const { resource: chat } = await container.item(chatId, chatId).read();
+        return chat;
+    } catch (error) {
+        if (error.code === 404) {
+            // Chat not found
+            return null;
+        } else {
+            throw error;
+        }
+    }
+}
+
+// Helper function to upsert chat history into Cosmos DB
+async function upsertChatHistory(chat) {
+    try {
+        // Add a new chat if it does not exist or update the existing chat
+        await container.items.upsert(chat, { partitionKey: chat.id });
+    } catch (error) {
+        console.error('Error upserting chat history:', error);
+        throw error;
+    }
+}
 
 // Endpoint to get the list of chat sessions with categories
 app.get('/chats', async (req, res) => {
