@@ -325,7 +325,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 }
 
 function generateChatId() {
-    const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret';  // Retrieve session secret or set a default
+    const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret2';  // Retrieve session secret or set a default
     const randomNumber = Math.random().toString(36).substr(2, 9); 
     return `${sessionSecret}_chat_${randomNumber}`; 
 }
@@ -379,12 +379,11 @@ fileUpload.addEventListener('change', async function () {
                         attachIcon.textContent = "attach_file";
                     }, 2000);
 
-                    // Get the file URL (assuming response contains a URL to the uploaded file)
-                    const fileData = await response.json();
-                    const fileUrl = fileData.url;  // Assuming the server returns the file URL
-                    
-                    // Append the file link to the chat
-                    appendFileLink(file.name, fileUrl);
+                    // Since the server does not return a file URL, we can inform the user that the file was uploaded
+                    appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                    // Optionally, you can also display the file name in the chat
+                    appendFileLink(file.name);
                 } else {
                     const errorData = await response.json();
                     console.error('Upload error:', errorData.error);
