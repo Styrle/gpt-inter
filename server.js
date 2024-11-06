@@ -12,6 +12,11 @@ const tesseract = require('tesseract.js');
 const { CosmosClient } = require("@azure/cosmos");
 const dotenv = require('dotenv');
 const helmet = require('helmet');
+const textract = require('textract');
+const { htmlToText } = require('html-to-text');
+const mime = require('mime-types');
+const removeMarkdown = require('remove-markdown');
+
 
 // Load environment variables from .env file
 dotenv.config();
@@ -26,14 +31,14 @@ const openai = new OpenAI({
 });
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret',
+    secret: process.env.SESSION_SECRET || 'defaultSecret2',
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false } 
 }));
 
 app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.session.secret || 'defaultSecret' });
+    res.json({ secret: req.session.secret || 'defaultSecret2' });
 });
 
 app.use(express.json());
@@ -120,25 +125,51 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     try {
         if (file.mimetype.startsWith('image/')) {
-            // For images, you might handle differently or skip
+            // Handle images if needed
             return res.status(200).json({ success: true });
         } else {
             let extractedText = '';
-            if (file.mimetype === 'application/pdf') {
+
+            // Get the file extension
+            const extension = path.extname(file.originalname).toLowerCase();
+
+            // Normalize the MIME type using mime-types (optional)
+            const mimetype = mime.lookup(extension) || file.mimetype;
+
+            // Extract text based on file type
+            if (mimetype === 'application/pdf' || extension === '.pdf') {
                 const data = await pdfParse(file.buffer);
                 extractedText = data.text;
-            } else if (file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx') {
                 const { value } = await mammoth.extractRawText({ buffer: file.buffer });
                 extractedText = value;
-            } else if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx') {
                 const workbook = xlsx.read(file.buffer, { type: 'buffer' });
                 const sheetNames = workbook.SheetNames;
                 sheetNames.forEach(sheetName => {
                     const sheet = workbook.Sheets[sheetName];
                     extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
                 });
-            } else if (file.mimetype === 'text/plain') {
+            } else if (mimetype === 'text/plain' || extension === '.txt') {
                 extractedText = file.buffer.toString('utf-8');
+            } else if (mimetype === 'text/markdown' || extension === '.md') {
+                const markdownContent = file.buffer.toString('utf-8');
+                extractedText = removeMarkdown(markdownContent);
+            } else if (mimetype === 'text/html' || extension === '.html' || extension === '.htm') {
+                const htmlContent = file.buffer.toString('utf-8');
+                extractedText = htmlToText(htmlContent, {
+                    wordwrap: 130,
+                });
+            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx') {
+                extractedText = await new Promise((resolve, reject) => {
+                    textract.fromBufferWithMime(file.mimetype, file.buffer, function (error, text) {
+                        if (error) {
+                            reject(error);
+                        } else {
+                            resolve(text);
+                        }
+                    });
+                });
             } else {
                 return res.status(400).json({ error: 'Unsupported file type.' });
             }
@@ -151,8 +182,33 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     title: 'File Upload',
                     messages: [],
                     timestamp: new Date().toISOString(),
+                    total_document_count: 0,  // Initialize document count
+                    total_document_size: 0,   // Initialize document size
                 };
             }
+
+            // Initialize document tracking fields if they don't exist
+            if (typeof chat.total_document_count !== 'number') {
+                chat.total_document_count = 0;
+            }
+            if (typeof chat.total_document_size !== 'number') {
+                chat.total_document_size = 0;
+            }
+
+            // Increment the document count
+            chat.total_document_count += 1;
+
+            // Add the document size to the total
+            chat.total_document_size += file.size || 0;
+
+            // Optionally, store the size of the individual document in the message history
+            chat.messages.push({
+                role: 'user',
+                content: `Uploaded a document: ${file.originalname}`,
+                timestamp: new Date().toISOString(),
+                tokens: 0, // Assuming no tokens for this message
+                documentSize: file.size || 0, // Store individual document size
+            });
 
             // Store the extracted text in the chat document
             chat.documentContent = extractedText;
@@ -168,13 +224,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 });
 
+
+
 // Endpoint to handle user messages and interact with OpenAI
 app.post('/chat', upload.single('image'), async (req, res) => {
     const { message, tutorMode } = req.body;
     const file = req.file;
 
     // Retrieve session secret from the session or use a default
-    const sessionSecret = req.session.secret || 'defaultSecret';
+    const sessionSecret = req.session.secret || 'defaultSecret2';
 
     // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
@@ -206,7 +264,17 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 average_tokens_per_interaction: 0, // Initialize average token usage
                 total_image_count: 0, // Initialize image count
                 total_image_size: 0, // Initialize total image size
+                total_document_count: 0, // Initialize document count
+                total_document_size: 0, // Initialize document size
             };
+        }
+
+        // Initialize document tracking fields if they don't exist
+        if (typeof chat.total_document_count !== 'number') {
+            chat.total_document_count = 0;
+        }
+        if (typeof chat.total_document_size !== 'number') {
+            chat.total_document_size = 0;
         }
 
         // Build messages array from existing chat history
@@ -259,10 +327,10 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             });
 
             // Initialize image tracking fields if they don't exist
-            if (!chat.total_image_count) {
+            if (typeof chat.total_image_count !== 'number') {
                 chat.total_image_count = 0;
             }
-            if (!chat.total_image_size) {
+            if (typeof chat.total_image_size !== 'number') {
                 chat.total_image_size = 0;
             }
 
@@ -270,7 +338,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             chat.total_image_count += 1;
 
             // Add the image size to the total
-            chat.total_image_size += file.size;
+            chat.total_image_size += file.size || 0;
 
             // Optionally, you can store the size of the individual image in the message history if needed
             chat.messages.push({
@@ -278,7 +346,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 content: message || 'Sent an image',
                 timestamp: new Date().toISOString(),
                 tokens: 0, // Assuming no tokens for image message
-                imageSize: file.size, // Store individual image size
+                imageSize: file.size || 0, // Store individual image size
             });
         }
 
@@ -386,6 +454,8 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             average_tokens_per_interaction: chat.average_tokens_per_interaction,
             total_image_count: chat.total_image_count,
             total_image_size: chat.total_image_size,
+            total_document_count: chat.total_document_count,
+            total_document_size: chat.total_document_size,
         });
     } catch (error) {
         console.error('Error processing chat request:', error);
@@ -397,7 +467,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 app.get('/chats', async (req, res) => {
     try {
         // Get session secret or default
-        const sessionSecret = req.session.secret || 'defaultSecret';
+        const sessionSecret = req.session.secret || 'defaultSecret2';
 
         // Query for all chats
         const querySpec = {
