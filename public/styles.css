@@ -212,22 +212,21 @@ ul.chat-category-list {
 }
 
 /* Loading dots animation */
-/* Loading dots animation */
 .loading-dots {
     margin-top: 10px;
     display: inline-block;
     position: relative;
-    width: 36px; /* Increase width for bigger dots */
-    height: 36px; /* Increase height for better alignment */
-    margin-left: 10px; /* Adjust spacing next to K logo */
-    vertical-align: middle; /* Ensure dots align vertically with the SVG */
+    width: 36px;
+    height: 36px;
+    margin-left: 10px;
+    vertical-align: middle;
 }
 
 .loading-dots div {
     position: absolute;
-    width: 8px; /* Make dots bigger */
-    height: 8px; /* Make dots bigger */
-    background: #005DE8; /* Same as the send button's active color */
+    width: 8px;
+    height: 8px;
+    background: #005DE8;
     border-radius: 50%;
     animation: loading-dots 1.2s infinite ease-in-out;
 }
@@ -238,12 +237,12 @@ ul.chat-category-list {
 }
 
 .loading-dots div:nth-child(2) {
-    left: 12px; /* Adjust distance between dots */
+    left: 12px;
     animation-delay: -0.12s;
 }
 
 .loading-dots div:nth-child(3) {
-    left: 24px; /* Adjust distance between dots */
+    left: 24px;
     animation-delay: 0;
 }
 
@@ -263,20 +262,20 @@ ul.chat-category-list {
     display: flex;
     justify-content: flex-end;
     align-items: center;
-    background-color: transparent; /* No background color for file uploads */
-    padding: 10px; /* Adjust padding as necessary */
-    border-radius: 8px; /* Optional, to match the general UI */
-    margin-bottom: 10px; /* Space between messages */
+    background-color: transparent;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 10px;
 }
 
 .file-upload-container .message-content {
-    background-color: #ffffff; /* White background for uploaded documents */
-    color: #2b2b2b; /* Black or dark text color */
+    background-color: #ffffff;
+    color: #2b2b2b;
     padding: 10px;
     max-width: 60%;
     text-align: right;
     display: flex;
-    align-items: center; /* Align the file link and delete button in the center */
+    align-items: center;
 
 }
 
@@ -299,7 +298,7 @@ ul.chat-category-list {
 }
 
 .delete-button:hover {
-    color: #ff4d4d; /* Change color on hover for a warning effect */
+    color: #ff4d4d;
 }
 
 /* Code block container styling */
@@ -328,7 +327,7 @@ pre {
 /* Code block itself */
 .code-block-container pre {
     margin: 0;
-    padding-right: 30px; /* Provide space for the copy button */
+    padding-right: 30px;
 }
 
 /* Copy button inside the code block */
@@ -337,24 +336,24 @@ pre {
     top: 8px;
     right: 8px;
     cursor: pointer;
-    color: #888; /* Initial color */
+    color: #888;
     font-size: 18px;
     transition: color 0.2s;
 }
 
 .code-copy-button:hover {
-    color: #005DE8; /* Hover color */
+    color: #005DE8; 
 }
 
 .code-copy-button:active {
-    color: #005DE8; /* Active color */
+    color: #005DE8;
 }
 
 /* Entire message copy button container */
 .copy-button-container {
     margin-top: 8px;
     display: flex;
-    justify-content: flex-start; /* Left-align the copy button */
+    justify-content: flex-start;
 }
 
 /* Copy button for entire message */
@@ -376,13 +375,13 @@ pre {
 .welcome-container {
     text-align: center;
     padding: 50px;
-    display: none; /* Initially hidden, will be shown via JavaScript */
+    display: none;
 }
 
 .welcome-image {
-    width: 80%; /* Use percentage for responsiveness, adjust the value as needed */
-    max-width: 400px; /* Optional: Limit the maximum width for larger screens */
-    height: auto; /* Ensure aspect ratio is maintained */
+    width: 80%;
+    max-width: 400px;
+    height: auto;
     margin-bottom: -20px;
 }
 
@@ -401,12 +400,12 @@ pre {
 
 @media (max-width: 768px) {
     .welcome-container h1 {
-        font-size: 22px; /* Scale down heading for smaller screens */
+        font-size: 22px;
     }
 
 
     .welcome-image {
-        width: 100%; /* Increase image width for smaller screens */
+        width: 100%;
         
         
     }
@@ -414,12 +413,12 @@ pre {
 
 @media (max-width: 480px) {
     .welcome-container h1 {
-        font-size: 18px; /* Further reduce heading size for very small screens */
+        font-size: 18px;
     }
 
 
     .welcome-image {
-        width: 100%; /* Make the image fill more of the screen on small devices */
+        width: 100%;
         
     }
 }
@@ -433,10 +432,10 @@ pre {
     min-width: 100px;
     box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.2);
     z-index: 1;
-    top: 40px; /* Adjust this to control the vertical spacing from the icon */
+    top: 40px;
     left: 80%;
     align-items: center;
-    transform: translateX(-50%); /* Center the dropdown under the icon */
+    transform: translateX(-50%);
     border-radius: 10px;
 }
 
@@ -465,13 +464,13 @@ pre {
 .checkmark {
     display: none;
     margin-left: 10px;
-    color: #006FBF; /* Adjust this color if needed */
+    color: #006FBF;
 }
 
 /* Show the checkmark for the active item */
 .active .checkmark {
     color: #006FBF;
-    display: inline; /* Display the checkmark when active */
+    display: inline;
     background-color: #F4F5F7;
 }
 
