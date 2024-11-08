@@ -124,16 +124,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     try {
+        let extractedText = '';
+
         if (file.mimetype.startsWith('image/')) {
-            // Handle images if needed
-            return res.status(200).json({ success: true });
+            // Use tesseract.js to extract text from the image
+            const { data: { text } } = await tesseract.recognize(file.buffer);
+            extractedText = text;
         } else {
-            let extractedText = '';
-
-            // Get the file extension
+            // Existing code for handling other file types
             const extension = path.extname(file.originalname).toLowerCase();
-
-            // Normalize the MIME type using mime-types (optional)
             const mimetype = mime.lookup(extension) || file.mimetype;
 
             // Extract text based on file type
@@ -173,51 +172,57 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             } else {
                 return res.status(400).json({ error: 'Unsupported file type.' });
             }
-
-            let chat = await getChatHistory(chatId);
-
-            if (!chat) {
-                chat = {
-                    id: chatId,
-                    title: 'File Upload',
-                    messages: [],
-                    timestamp: new Date().toISOString(),
-                    total_document_count: 0,  // Initialize document count
-                    total_document_size: 0,   // Initialize document size
-                };
-            }
-
-            // Initialize document tracking fields if they don't exist
-            if (typeof chat.total_document_count !== 'number') {
-                chat.total_document_count = 0;
-            }
-            if (typeof chat.total_document_size !== 'number') {
-                chat.total_document_size = 0;
-            }
-
-            // Increment the document count
-            chat.total_document_count += 1;
-
-            // Add the document size to the total
-            chat.total_document_size += file.size || 0;
-
-            // Optionally, store the size of the individual document in the message history
-            chat.messages.push({
-                role: 'user',
-                content: `Uploaded a document: ${file.originalname}`,
-                timestamp: new Date().toISOString(),
-                tokens: 0, // Assuming no tokens for this message
-                documentSize: file.size || 0, // Store individual document size
-            });
-
-            // Store the extracted text in the chat document
-            chat.documentContent = extractedText;
-
-            // Upsert the chat document
-            await upsertChatHistory(chat);
-
-            res.status(200).json({ success: true });
         }
+
+        let chat = await getChatHistory(chatId);
+
+        if (!chat) {
+            chat = {
+                id: chatId,
+                title: 'File Upload',
+                messages: [],
+                timestamp: new Date().toISOString(),
+                total_document_count: 0,  // Initialize document count
+                total_document_size: 0,   // Initialize document size
+            };
+        }
+
+        // Initialize document tracking fields if they don't exist
+        if (typeof chat.total_document_count !== 'number') {
+            chat.total_document_count = 0;
+        }
+        if (typeof chat.total_document_size !== 'number') {
+            chat.total_document_size = 0;
+        }
+
+        // Increment the document count
+        chat.total_document_count += 1;
+
+        // Add the document size to the total
+        chat.total_document_size += file.size || 0;
+
+        // Optionally, store the size of the individual document in the message history
+        chat.messages.push({
+            role: 'user',
+            content: `Uploaded a document: ${file.originalname}`,
+            timestamp: new Date().toISOString(),
+            tokens: 0, // Assuming no tokens for this message
+            documentSize: file.size || 0, // Store individual document size
+        });
+
+        // Store the extracted text in the chat document
+        if (!chat.documentContent) {
+            chat.documentContent = extractedText;
+        } else {
+            // Append the new extracted text to existing content
+            chat.documentContent += '\n' + extractedText;
+        }
+
+        // Upsert the chat document
+        await upsertChatHistory(chat);
+
+        res.status(200).json({ success: true });
+
     } catch (error) {
         console.error('Error processing file:', error);
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
@@ -357,7 +362,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 content: `Here is the document content:\n${chat.documentContent}`,
                 timestamp: new Date().toISOString(),
             });
-            delete chat.documentContent;  // Remove after processing
+            // Do not delete chat.documentContent; let it persist across messages
         }
 
         // Prepare payload for OpenAI
@@ -409,17 +414,6 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 timestamp: new Date().toISOString(),
                 tokens: prompt_tokens, // Add input tokens for image message
             });
-        }
-
-        if (chat.documentContent) {
-            // Optionally, include a placeholder message
-            chat.messages.push({
-                role: 'user',
-                content: 'Uploaded a document',
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens,
-            });
-            delete chat.documentContent;  // Remove after processing
         }
 
         // Add assistant's message with token count
