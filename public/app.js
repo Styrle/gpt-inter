@@ -446,15 +446,61 @@ const sidebar = document.getElementById('sidebar');
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     const collapseBtn = document.getElementById('collapse-btn');
-    
+    const newChatBtn = document.getElementById('new-chat-btn');
+    const attachIcon = document.getElementById('attach-icon');
+    const tutorModeButton = document.getElementById('tutor-mode-button');
+    const iconContainer = document.querySelector('.icon-container'); // Get the icon-container
+
     if (sidebar.classList.contains('collapsed')) {
-      sidebar.classList.remove('collapsed');
-      collapseBtn.textContent = 'left_panel_close';
+        sidebar.classList.remove('collapsed');
+        collapseBtn.textContent = 'left_panel_close';
+
+        // Add 'active' class to icons and icon-container when sidebar is open
+        collapseBtn.classList.add('active');
+        newChatBtn.classList.add('active');
+        attachIcon.classList.add('active');
+        tutorModeButton.classList.add('active');
+        iconContainer.classList.add('active');
     } else {
-      sidebar.classList.add('collapsed');
-      collapseBtn.textContent = 'left_panel_open';
+        sidebar.classList.add('collapsed');
+        collapseBtn.textContent = 'left_panel_open';
+
+        // Remove 'active' class from icons and icon-container when sidebar is closed
+        collapseBtn.classList.remove('active');
+        newChatBtn.classList.remove('active');
+        attachIcon.classList.remove('active');
+        tutorModeButton.classList.remove('active');
+        iconContainer.classList.remove('active');
     }
-  }
+}
+
+function initializeActiveState() {
+    const sidebar = document.getElementById('sidebar');
+    const collapseBtn = document.getElementById('collapse-btn');
+    const newChatBtn = document.getElementById('new-chat-btn');
+    const attachIcon = document.getElementById('attach-icon');
+    const tutorModeButton = document.getElementById('tutor-mode-button');
+    const iconContainer = document.querySelector('.icon-container');
+
+    if (!sidebar.classList.contains('collapsed')) {
+        // Sidebar is open, add 'active' class to icons and icon-container
+        collapseBtn.classList.add('active');
+        newChatBtn.classList.add('active');
+        attachIcon.classList.add('active');
+        tutorModeButton.classList.add('active');
+        iconContainer.classList.add('active');
+    } else {
+        // Sidebar is collapsed, remove 'active' class from icons and icon-container
+        collapseBtn.classList.remove('active');
+        newChatBtn.classList.remove('active');
+        attachIcon.classList.remove('active');
+        tutorModeButton.classList.remove('active');
+        iconContainer.classList.remove('active');
+    }
+}
+
+// Call the initializeActiveState function when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', initializeActiveState);
 
 
   sendBtn.addEventListener('click', async () => {

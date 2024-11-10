@@ -109,6 +109,16 @@
     border: 0;
 }
 
+.icon-container.active {
+    background-color: #F7F8F9;
+    width: 200px;
+}
+
+.collapse-icon.active,
+.new-chat-icon.active,
+.tutor-mode-icon.active {
+    color: red; /* Change this to your desired active color */
+}
 
 .send-icon {
     cursor: pointer;
@@ -304,7 +314,7 @@ ul.chat-category-list {
 /* Code block container styling */
 .code-block-container {
     position: relative;
-    background-color: #f5f5f5;
+    background-color: #0d0d0d;
     padding: 10px;
     margin: 10px 0;
     border-radius: 8px;
@@ -315,6 +325,10 @@ ul.chat-category-list {
 pre {
     margin: 0;
     font-family: 'Courier New', monospace;
+}
+
+pre code.hljs {
+    background-color: #0d0d0d;
 }
 
 .code-block-container .code-copy-button {
@@ -476,21 +490,29 @@ pre {
 
 /* Styling for code blocks */
 .hljs-keyword {
-    color: #a626a4;
+    color: #2e95d3 !important;
+}
+
+.hljs {
+    color: #CBCCCF !important;
 }
 
 .hljs-string {
-    color: #50a14f;
+    color: #00a67d !important;
 }
 
 .hljs-title {
-    color: #4078f2;
-}
+    color: #f22c3d !important;
+} 
 
 .hljs-number {
-    color: #986801;
+    color: #df3079 !important;
 }
 
 .hljs-attr {
-    color: #986801;
+    color: #00a67d !important;
+}
+
+.hljs-comment {
+    color: #ffffff80 !important;
 }
