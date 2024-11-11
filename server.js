@@ -43,19 +43,31 @@ function getUserInfo(req, res, next) {
 
 app.use(getUserInfo);
 
-  function ensureAuthenticated(req, res, next) {
-    if (req.user) {
-        return next();
-    }
 
-    // Check for AJAX request using X-Requested-With header
-    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
-        res.status(401).json({ error: 'Unauthorized' });
-    } else {
-        // Redirect to login for normal browser requests
-        res.redirect('/login');
+
+function ensureAuthenticated(req, res, next) {
+    if (req.user) {
+      return next();
     }
-}
+  
+    // Check for AJAX request
+    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
+      res.status(401).json({ error: 'Unauthorized' });
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        // In development, simulate authentication
+        req.user = {
+          userId: 'test-user-id',
+          userDetails: 'Test User',
+          userRoles: ['authenticated'],
+        };
+        return next();
+      } else {
+        // In production, redirect to login
+        res.redirect('/login');
+      }
+    }
+  }
 
 app.use(session({
     secret: process.env.SESSION_SECRET || 'defaultSecret2',
@@ -573,19 +585,22 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
     }
 });
 
-if (process.env.NODE_ENV === 'development') {
-    app.use((req, res, next) => {
-      req.user = {
-        userId: 'test-user-id',
-        userDetails: 'Test User',
-        userRoles: ['authenticated'],
-      };
-      next();
-    });
-  } else {
-    // Use the getUserInfo middleware in production
-    app.use(getUserInfo);
-  }
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+if (isDevelopment) {
+  // Mock authentication middleware for development
+  app.use((req, res, next) => {
+    req.user = {
+      userId: 'test-user-id',
+      userDetails: 'Test User',
+      userRoles: ['authenticated'],
+    };
+    next();
+  });
+} else {
+  // Use the getUserInfo middleware in production
+  app.use(getUserInfo);
+}
 
 // Endpoint to retrieve a specific chat history
 app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
@@ -643,15 +658,34 @@ deleteOldChats();
 // Schedule the old chat deletion to run every 24 hours
 setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
 
-// Redirect to Azure's login page
-app.get('/login', (req, res) => {
-    res.redirect('/.auth/login/aad');
-  });
+if (isDevelopment) {
+    // Mock /login route for development
+    app.get('/login', (req, res) => {
+      // Simulate login by setting req.user
+      req.user = {
+        userId: 'test-user-id',
+        userDetails: 'Test User',
+        userRoles: ['authenticated'],
+      };
+      res.redirect('/');
+    });
   
-  // Redirect to Azure's logout page
-  app.get('/logout', (req, res) => {
-    res.redirect('/.auth/logout');
-  });
+    // Mock /logout route for development
+    app.get('/logout', (req, res) => {
+      // Simulate logout by clearing req.user
+      req.user = null;
+      res.redirect('/');
+    });
+  } else {
+    // Production routes
+    app.get('/login', (req, res) => {
+      res.redirect('/.auth/login/aad');
+    });
+  
+    app.get('/logout', (req, res) => {
+      res.redirect('/.auth/logout');
+    });
+  }
 
   app.get('/user-info', ensureAuthenticated, (req, res) => {
     const userId = req.user && req.user.userDetails ? req.user.userDetails : 'anonymous';

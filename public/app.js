@@ -103,27 +103,37 @@ attachIcon.addEventListener('click', () => {
     //fileUpload.click(); // Manually trigger the file input
 });
 
+function isDevelopment() {
+    return window.location.hostname === 'localhost';
+}
+
 // Load existing chats from history and categorize them
 async function loadChatHistory() {
     try {
-        const res = await fetch('/chats', {
-            credentials: 'include',
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        });
-
-        if (res.status === 401) {
-            window.location.href = '/login';
-            return;
+      const res = await fetch('/chats', {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+  
+      if (res.status === 401) {
+        if (isDevelopment()) {
+          // In development, simulate login
+          await fetch('/login');
+          loadChatHistory(); // Retry after login
+        } else {
+          window.location.href = '/login';
         }
-
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-        }
-
-        const chats = await res.json();
+        return;
+      }
+  
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+  
+      const chats = await res.json();
 
         chatHistoryList.innerHTML = ''; // Clear the existing list
 
