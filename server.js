@@ -16,6 +16,9 @@ const textract = require('textract');
 const { htmlToText } = require('html-to-text');
 const mime = require('mime-types');
 const removeMarkdown = require('remove-markdown');
+const passport = require('passport');
+const OIDCStrategy = require('passport-azure-ad').OIDCStrategy;
+
 
 
 // Load environment variables from .env file
@@ -30,15 +33,70 @@ const openai = new OpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
 });
 
+function ensureAuthenticated(req, res, next) {
+    if (req.isAuthenticated()) { 
+        return next(); 
+    }
+    
+    // Check if the request is an AJAX request
+    if (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1) {
+        // Respond with 401 Unauthorized for AJAX requests
+        res.status(401).json({ error: 'Unauthorized' });
+    } else {
+        // Redirect to login for normal browser requests
+        res.redirect('/login');
+    }
+}
+
 app.use(session({
     secret: process.env.SESSION_SECRET || 'defaultSecret2',
     resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false } 
+    saveUninitialized: false,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000, // Cookie expiration
+    },
 }));
 
+const config = {
+    identityMetadata: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0/.well-known/openid-configuration`,
+    clientID: process.env.AZURE_CLIENT_ID,
+    clientSecret: process.env.AZURE_CLIENT_SECRET,
+    responseType: 'code id_token',
+    responseMode: 'form_post',
+    redirectUrl: process.env.OIDC_REDIRECT_URL || 'http://localhost:8080/auth/openid/return',
+    allowHttpForRedirectUrl: true,
+    validateIssuer: false,
+    passReqToCallback: false,
+    scope: ['profile', 'email', 'offline_access'],
+    loggingLevel: 'info',
+};
+
+passport.use(new OIDCStrategy(config,
+    function(iss, sub, profile, accessToken, refreshToken, done) {
+        if (!profile.oid) {
+            return done(new Error("No oid found"), null);
+        }
+        // User authentication successful, proceed to store user info
+        return done(null, profile);
+    }
+));
+
+// Serialize and deserialize user instances to and from the session
+passport.serializeUser(function(user, done) {
+    done(null, user);
+});
+
+passport.deserializeUser(function(obj, done) {
+    done(null, obj);
+});
+
+app.use(passport.initialize());
+app.use(passport.session());
+
 app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.session.secret || 'defaultSecret2' });
+    res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
 });
 
 app.use(express.json());
@@ -51,9 +109,9 @@ const client = new CosmosClient({
 
 app.use(helmet({
     contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'", "chrome-extension:"],
-        scriptSrc: ["'self'", "chrome-extension:"],
+        directives: {
+            defaultSrc: ["'self'", "https://login.microsoftonline.com"],
+            scriptSrc: ["'self'", "https://login.microsoftonline.com"],
       },
     },
   }));
@@ -111,9 +169,12 @@ function categorizeChat(timestamp) {
 }
 
 // Endpoint to handle file uploads and extract content
-app.post('/upload', upload.single('file'), async (req, res) => {
+app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res) => {
     const file = req.file;
     const chatId = req.body.chatId;
+
+    // Get username from the authenticated user
+    const username = req.user.displayName || req.user.upn || req.user.email;
 
     if (!file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -121,6 +182,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     if (!chatId) {
         return res.status(400).json({ error: 'Missing chatId' });
+    }
+
+    // Validate that the chatId belongs to the current user
+    if (!chatId.startsWith(`${username}_chat_`)) {
+        return res.status(403).json({ error: 'Unauthorized' });
     }
 
     try {
@@ -232,18 +298,18 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
 
 // Endpoint to handle user messages and interact with OpenAI
-app.post('/chat', upload.single('image'), async (req, res) => {
+app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) => {
     const { message, tutorMode } = req.body;
     const file = req.file;
 
-    // Retrieve session secret from the session or use a default
-    const sessionSecret = req.session.secret || 'defaultSecret2';
+    // Get username from the authenticated user
+    const username = req.user.displayName || req.user.upn || req.user.email;
 
     // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
     if (!chatId) {
         const randomNumber = Math.random().toString(36).substr(2, 9);  // Generate a unique number
-        chatId = `${sessionSecret}_chat_${randomNumber}`;  // Format: "secret_chat_number"
+        chatId = `${username}_chat_${randomNumber}`;  // Format: "username_chat_number"
     }
 
     // Validate that either a message or file is present
@@ -458,10 +524,10 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 });
 
 // Endpoint to get the list of chat sessions with categories
-app.get('/chats', async (req, res) => {
+app.get('/chats', ensureAuthenticated, async (req, res) => {
     try {
-        // Get session secret or default
-        const sessionSecret = req.session.secret || 'defaultSecret2';
+        // Get username from the authenticated user
+        const username = req.user.displayName || req.user.upn || req.user.email;
 
         // Query for all chats
         const querySpec = {
@@ -472,8 +538,8 @@ app.get('/chats', async (req, res) => {
 
         const categorizedChats = {};
 
-        // Filter chats that belong to the current session secret
-        const filteredChats = chats.filter(chat => chat.id.startsWith(`${sessionSecret}_chat_`));
+        // Filter chats that belong to the current user
+        const filteredChats = chats.filter(chat => chat.id.startsWith(`${username}_chat_`));
 
         // Categorize the chats based on date
         filteredChats.forEach(chat => {
@@ -497,8 +563,14 @@ app.get('/chats', async (req, res) => {
 });
 
 // Endpoint to retrieve a specific chat history
-app.get('/chats/:chatId', async (req, res) => {
+app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     const { chatId } = req.params;
+    const username = req.user.displayName || req.user.upn || req.user.email;
+
+    // Check if the chatId belongs to the current user
+    if (!chatId.startsWith(`${username}_chat_`)) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
 
     try {
         const chat = await getChatHistory(chatId);
@@ -545,6 +617,29 @@ deleteOldChats();
 
 // Schedule the old chat deletion to run every 24 hours
 setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
+
+// Route to start the authentication process
+app.get('/login', 
+    passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
+    function(req, res) {
+        res.redirect('/');
+    }
+);
+
+// Callback route for Azure AD to redirect to
+app.post('/auth/openid/return', 
+    passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
+    function(req, res) {
+        // Successful authentication
+        res.redirect('/');
+    }
+);
+
+// Route to handle logout
+app.get('/logout', function(req, res){
+    req.logout();
+    res.redirect('/');
+});
 
 // Start the server on the specified port
 app.listen(port, () => {
