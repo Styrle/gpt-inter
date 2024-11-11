@@ -65,7 +65,7 @@ const config = {
     clientSecret: process.env.AZURE_CLIENT_SECRET,
     responseType: 'code id_token',
     responseMode: 'form_post',
-    redirectUrl: process.env.OIDC_REDIRECT_URL || 'http://localhost:8080/auth/openid/return',
+    redirectUrl: process.env.OIDC_REDIRECT_URL,
     allowHttpForRedirectUrl: true,
     validateIssuer: false,
     passReqToCallback: false,
@@ -112,6 +112,7 @@ app.use(helmet({
         directives: {
             defaultSrc: ["'self'", "https://login.microsoftonline.com"],
             scriptSrc: ["'self'", "https://login.microsoftonline.com"],
+            connectSrc: ["'self'", "https://login.microsoftonline.com"],
       },
     },
   }));
