@@ -1,6 +1,9 @@
-// Retrieve chatId from sessionStorage or generate a new one
-let chatId = sessionStorage.getItem('chatId') || generateChatId();
+// Generate a new chatId on page load
+let chatId = generateChatId();
 sessionStorage.setItem('chatId', chatId);
+
+// Initialize variables
+let isFirstInteraction = true;
 
 const chatHistoryList = document.getElementById('chat-history');
 const chatBox = document.getElementById('chat-box');
@@ -66,7 +69,6 @@ dropdownItems.forEach(item => {
     });
 });
 
-
 // Send message function - ensure tutorMode is passed
 async function sendMessage(message) {
     const res = await fetch('/chat', {
@@ -83,8 +85,6 @@ async function sendMessage(message) {
     const data = await res.json();
     return data.response;
 }
-
-
 
 // Handle clicking the attach icon to trigger the file input
 attachIcon.addEventListener('click', () => {
@@ -132,8 +132,6 @@ async function loadChatHistory() {
     });
 }
 
-
-
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
     chatId = chatIdToLoad; // Set chatId to the one being loaded
@@ -157,7 +155,6 @@ async function loadChat(chatIdToLoad) {
     });
 }
 
-
 newChatBtn.addEventListener('click', () => {
     // Clear chat window and show the welcome screen
     chatBox.innerHTML = '';
@@ -170,7 +167,6 @@ newChatBtn.addEventListener('click', () => {
     loadChatHistory(); // Reload chat history in the side panel
     isFirstInteraction = true;
 });
-
 
 function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const chatBox = document.getElementById("chat-box");
@@ -329,6 +325,7 @@ function generateChatId() {
     const randomNumber = Math.random().toString(36).substr(2, 9); 
     return `${sessionSecret}_chat_${randomNumber}`; 
 }
+
 let selectedImageFile = null;
 
 // Handle file upload and sending message
@@ -403,8 +400,6 @@ fileUpload.addEventListener('change', async function () {
     }
 });
 
-
-
 function appendFileLink(fileName, fileUrl) {
     const chatBox = document.getElementById('chat-box');
     
@@ -446,18 +441,69 @@ const sidebar = document.getElementById('sidebar');
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     const collapseBtn = document.getElementById('collapse-btn');
-    
+    const newChatBtn = document.getElementById('new-chat-btn');
+    const attachIcon = document.getElementById('attach-icon');
+    const chatWindow = document.querySelector('.chat-window');
+    const tutorModeButton = document.getElementById('tutor-mode-button');
+    const iconContainer = document.querySelector('.icon-container'); // Get the icon-container
+
     if (sidebar.classList.contains('collapsed')) {
-      sidebar.classList.remove('collapsed');
-      collapseBtn.textContent = 'left_panel_close';
+        sidebar.classList.remove('collapsed');
+        collapseBtn.textContent = 'left_panel_close';
+        chatWindow.classList.remove('collapsed');
+
+        // Add 'active' class to icons and icon-container when sidebar is open
+        collapseBtn.classList.add('active');
+        newChatBtn.classList.add('active');
+        attachIcon.classList.add('active');
+        tutorModeButton.classList.add('active');
+        iconContainer.classList.add('active');
     } else {
-      sidebar.classList.add('collapsed');
-      collapseBtn.textContent = 'left_panel_open';
+        sidebar.classList.add('collapsed');
+        collapseBtn.textContent = 'left_panel_open';
+        chatWindow.classList.add('collapsed');
+
+        // Remove 'active' class from icons and icon-container when sidebar is closed
+        collapseBtn.classList.remove('active');
+        newChatBtn.classList.remove('active');
+        attachIcon.classList.remove('active');
+        tutorModeButton.classList.remove('active');
+        iconContainer.classList.remove('active');
     }
-  }
+}
 
+function initializeActiveState() {
+    const sidebar = document.getElementById('sidebar');
+    const collapseBtn = document.getElementById('collapse-btn');
+    const newChatBtn = document.getElementById('new-chat-btn');
+    const attachIcon = document.getElementById('attach-icon');
+    const tutorModeButton = document.getElementById('tutor-mode-button');
+    const iconContainer = document.querySelector('.icon-container');
 
-  sendBtn.addEventListener('click', async () => {
+    if (!sidebar.classList.contains('collapsed')) {
+        // Sidebar is open, add 'active' class to icons and icon-container
+        collapseBtn.classList.add('active');
+        newChatBtn.classList.add('active');
+        attachIcon.classList.add('active');
+        tutorModeButton.classList.add('active');
+        iconContainer.classList.add('active');
+    } else {
+        // Sidebar is collapsed, remove 'active' class from icons and icon-container
+        collapseBtn.classList.remove('active');
+        newChatBtn.classList.remove('active');
+        attachIcon.classList.remove('active');
+        tutorModeButton.classList.remove('active');
+        iconContainer.classList.remove('active');
+    }
+}
+
+// Call the initializeActiveState function when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    initializeActiveState();
+    loadChatHistory(); // Load chat history on page load
+});
+
+sendBtn.addEventListener('click', async () => {
     const message = chatInput.value.trim();
     if (message || selectedImageFile) {
         // Log current tutor mode before sending the message
@@ -528,7 +574,6 @@ function streamMessageFromServer() {
     };
 }
 
-
 function streamParsedResponse(messageContent, rawResponseText) {
     const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
     let currentWordIndex = 0;
@@ -561,7 +606,6 @@ function streamParsedResponse(messageContent, rawResponseText) {
                 ],
                 throwOnError: false
             });
-            
 
             chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
         } else {
@@ -603,7 +647,6 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
                 ],
                 throwOnError: false
             });
-            
 
             messageBody.appendChild(messageText);
             entireMessage += part.trim();
@@ -617,16 +660,19 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeContent.textContent = part.trim();
             codeElement.appendChild(codeContent);
 
+            // Initialize Highlight.js for the code block
+            hljs.highlightElement(codeContent);
+
             // Create copy button for the code block
             const codeCopyButton = document.createElement('span');
             codeCopyButton.classList.add('material-symbols-rounded', 'code-copy-button');
-            codeCopyButton.textContent = 'content_copy';
+            codeCopyButton.textContent = "content_copy";
 
             codeCopyButton.addEventListener('click', () => {
                 navigator.clipboard.writeText(part.trim()).then(() => {
                     codeCopyButton.textContent = 'done';
                     setTimeout(() => {
-                        codeCopyButton.textContent = 'content_copy';
+                        codeCopyButton.textContent = "content_copy";
                     }, 2000);
                 });
             });
@@ -638,33 +684,27 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         }
     });
 
-    // Add copy button for the entire message
-    const copyButtonContainer = document.createElement('div');
-    copyButtonContainer.classList.add('copy-button-container');
+    // Add copy button for the entire AI message
+    const copyButtonContainer = document.createElement("div");
+    copyButtonContainer.classList.add("copy-button-container");
 
-    const copyButton = document.createElement('span');
-    copyButton.classList.add('material-symbols-rounded', 'copy-button');
-    copyButton.textContent = 'content_copy';
+    const copyButton = document.createElement("span");
+    copyButton.classList.add("material-symbols-rounded", "copy-button");
+    copyButton.textContent = "content_copy";
     copyButtonContainer.appendChild(copyButton);
 
     messageBody.appendChild(copyButtonContainer);
 
-    // Add click event to copy the entire message
-    copyButton.addEventListener('click', () => {
-        navigator.clipboard.writeText(rawResponseText).then(() => {
-            copyButton.textContent = 'done';
+    // Copy the entire message
+    copyButton.addEventListener("click", () => {
+        navigator.clipboard.writeText(entireMessage).then(() => {
+            copyButton.textContent = "done";
             setTimeout(() => {
-                copyButton.textContent = 'content_copy';
+                copyButton.textContent = "content_copy";
             }, 2000);
         });
     });
-
-    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
 }
-
-
-
-
 
 
 
@@ -758,10 +798,6 @@ chatInput.addEventListener('keydown', async (event) => {
     }
 });
 
-
-
-// Flag to track if this is the user's first interaction
-let isFirstInteraction = true;
 
 // Function to show the welcome screen
 function showWelcomeScreen() {
