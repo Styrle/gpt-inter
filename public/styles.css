@@ -9,13 +9,27 @@
     display: flex;
     flex-direction: column;
     padding: 20px;
-    overflow: hidden; /* Prevent input box from being pushed down */
+    overflow: hidden;
+}
+
+.chat-window.collapsed {
+    max-width: calc(60vw);
+    margin: 0 auto;
+    transition: margin 0.3s ease;
+}
+
+@media (max-width: 1100px) {
+    .chat-window.collapsed {
+        max-width: calc(60vw);
+        margin: 0px 0px 0px auto;
+        transition: margin 0.3s ease;
+    }
 }
 
 #chat-box {
     flex: 1;
-    overflow-y: auto; /* Make only the chat messages scrollable */
-    margin-bottom: 10px; /* Add a bit of space above the input area */
+    overflow-y: auto;
+    margin-bottom: 10px;
     padding: 10px;
 }
 
@@ -50,6 +64,7 @@
     cursor: pointer;
     font-size: 24px;
     margin-right: 10px;
+    color: #909095 !important;
 }
 
 #send-btn {
@@ -57,6 +72,7 @@
     padding: 10px;
     cursor: pointer;
     font-size: 24px;
+    color: #909095 !important;
 }
 
 .sidebar {
@@ -109,6 +125,16 @@
     border: 0;
 }
 
+.icon-container.active {
+    background-color: #F7F8F9;
+    width: 200px;
+}
+
+.collapse-icon.active,
+.new-chat-icon.active,
+.tutor-mode-icon.active {
+    color: #909095;
+}
 
 .send-icon {
     cursor: pointer;
@@ -304,7 +330,7 @@ ul.chat-category-list {
 /* Code block container styling */
 .code-block-container {
     position: relative;
-    background-color: #f5f5f5;
+    background-color: #0d0d0d;
     padding: 10px;
     margin: 10px 0;
     border-radius: 8px;
@@ -315,6 +341,10 @@ ul.chat-category-list {
 pre {
     margin: 0;
     font-family: 'Courier New', monospace;
+}
+
+pre code.hljs {
+    background-color: #0d0d0d;
 }
 
 .code-block-container .code-copy-button {
@@ -476,21 +506,29 @@ pre {
 
 /* Styling for code blocks */
 .hljs-keyword {
-    color: #a626a4;
+    color: #2e95d3 !important;
+}
+
+.hljs {
+    color: #CBCCCF !important;
 }
 
 .hljs-string {
-    color: #50a14f;
+    color: #00a67d !important;
 }
 
 .hljs-title {
-    color: #4078f2;
-}
+    color: #f22c3d !important;
+} 
 
 .hljs-number {
-    color: #986801;
+    color: #df3079 !important;
 }
 
 .hljs-attr {
-    color: #986801;
+    color: #00a67d !important;
+}
+
+.hljs-comment {
+    color: #ffffff80 !important;
 }

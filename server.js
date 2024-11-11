@@ -22,7 +22,7 @@ const removeMarkdown = require('remove-markdown');
 dotenv.config();
 
 const app = express();
-const port = 3000;
+const port = 8080;
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -124,16 +124,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     try {
+        let extractedText = '';
+
         if (file.mimetype.startsWith('image/')) {
-            // Handle images if needed
-            return res.status(200).json({ success: true });
+            // Use tesseract.js to extract text from the image
+            const { data: { text } } = await tesseract.recognize(file.buffer);
+            extractedText = text;
         } else {
-            let extractedText = '';
-
-            // Get the file extension
+            // Existing code for handling other file types
             const extension = path.extname(file.originalname).toLowerCase();
-
-            // Normalize the MIME type using mime-types (optional)
             const mimetype = mime.lookup(extension) || file.mimetype;
 
             // Extract text based on file type
@@ -173,51 +172,57 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             } else {
                 return res.status(400).json({ error: 'Unsupported file type.' });
             }
-
-            let chat = await getChatHistory(chatId);
-
-            if (!chat) {
-                chat = {
-                    id: chatId,
-                    title: 'File Upload',
-                    messages: [],
-                    timestamp: new Date().toISOString(),
-                    total_document_count: 0,  // Initialize document count
-                    total_document_size: 0,   // Initialize document size
-                };
-            }
-
-            // Initialize document tracking fields if they don't exist
-            if (typeof chat.total_document_count !== 'number') {
-                chat.total_document_count = 0;
-            }
-            if (typeof chat.total_document_size !== 'number') {
-                chat.total_document_size = 0;
-            }
-
-            // Increment the document count
-            chat.total_document_count += 1;
-
-            // Add the document size to the total
-            chat.total_document_size += file.size || 0;
-
-            // Optionally, store the size of the individual document in the message history
-            chat.messages.push({
-                role: 'user',
-                content: `Uploaded a document: ${file.originalname}`,
-                timestamp: new Date().toISOString(),
-                tokens: 0, // Assuming no tokens for this message
-                documentSize: file.size || 0, // Store individual document size
-            });
-
-            // Store the extracted text in the chat document
-            chat.documentContent = extractedText;
-
-            // Upsert the chat document
-            await upsertChatHistory(chat);
-
-            res.status(200).json({ success: true });
         }
+
+        let chat = await getChatHistory(chatId);
+
+        if (!chat) {
+            chat = {
+                id: chatId,
+                title: 'File Upload',
+                messages: [],
+                timestamp: new Date().toISOString(),
+                total_document_count: 0,  // Initialize document count
+                total_document_size: 0,   // Initialize document size
+            };
+        }
+
+        // Initialize document tracking fields if they don't exist
+        if (typeof chat.total_document_count !== 'number') {
+            chat.total_document_count = 0;
+        }
+        if (typeof chat.total_document_size !== 'number') {
+            chat.total_document_size = 0;
+        }
+
+        // Increment the document count
+        chat.total_document_count += 1;
+
+        // Add the document size to the total
+        chat.total_document_size += file.size || 0;
+
+        // Optionally, store the size of the individual document in the message history
+        chat.messages.push({
+            role: 'user',
+            content: `Uploaded a document: ${file.originalname}`,
+            timestamp: new Date().toISOString(),
+            tokens: 0, // Assuming no tokens for this message
+            documentSize: file.size || 0, // Store individual document size
+        });
+
+        // Store the extracted text in the chat document
+        if (!chat.documentContent) {
+            chat.documentContent = extractedText;
+        } else {
+            // Append the new extracted text to existing content
+            chat.documentContent += '\n' + extractedText;
+        }
+
+        // Upsert the chat document
+        await upsertChatHistory(chat);
+
+        res.status(200).json({ success: true });
+
     } catch (error) {
         console.error('Error processing file:', error);
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
@@ -232,7 +237,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
     const file = req.file;
 
     // Retrieve session secret from the session or use a default
-    const sessionSecret = req.session.secret || 'defaultSecret2';
+    const sessionSecret = req.session.secret || 'defaultSecret3';
 
     // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
@@ -252,11 +257,12 @@ app.post('/chat', upload.single('image'), async (req, res) => {
         // Retrieve existing chat history or create a new one
         let chat = await getChatHistory(chatId);
 
+        let isNewChat = false;
         if (!chat) {
-            const title = message ? message.slice(0, 50) : 'New Chat';
+            isNewChat = true;
             chat = {
                 id: chatId,
-                title,
+                title: 'New Chat', // Temporary title
                 messages: [],
                 timestamp: new Date().toISOString(), // Chat creation timestamp
                 total_tokens_used: 0,  // Initialize token counter
@@ -357,7 +363,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
                 content: `Here is the document content:\n${chat.documentContent}`,
                 timestamp: new Date().toISOString(),
             });
-            delete chat.documentContent;  // Remove after processing
+            // Do not delete chat.documentContent; let it persist across messages
         }
 
         // Prepare payload for OpenAI
@@ -411,17 +417,6 @@ app.post('/chat', upload.single('image'), async (req, res) => {
             });
         }
 
-        if (chat.documentContent) {
-            // Optionally, include a placeholder message
-            chat.messages.push({
-                role: 'user',
-                content: 'Uploaded a document',
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens,
-            });
-            delete chat.documentContent;  // Remove after processing
-        }
-
         // Add assistant's message with token count
         chat.messages.push({
             role: 'assistant',
@@ -439,6 +434,42 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 
         // Update timestamp for the overall chat
         chat.timestamp = new Date().toISOString();
+
+        // If this is a new chat, generate a title
+        if (isNewChat) {
+            // Generate chat title using OpenAI
+            const titlePrompt = [
+                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation.' },
+                { role: 'user', content: message }
+            ];
+
+            // Prepare payload for OpenAI
+            const titlePayload = {
+                model: 'gpt-4o',
+                messages: titlePrompt,
+            };
+
+            // Make API call to OpenAI
+            const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'api-key': process.env.AZURE_OPENAI_API_KEY,
+                },
+                body: JSON.stringify(titlePayload),
+            });
+
+            if (!titleResponse.ok) {
+                const errorText = await titleResponse.text();
+                console.error('Error from OpenAI API when generating title:', errorText);
+                // Proceed without updating the title
+            } else {
+                const titleData = await titleResponse.json();
+                const generatedTitle = titleData.choices[0].message.content.trim();
+                // Update the chat's title
+                chat.title = generatedTitle;
+            }
+        }
 
         // Upsert the chat document into Cosmos DB
         await upsertChatHistory(chat);
