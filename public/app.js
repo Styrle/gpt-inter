@@ -70,20 +70,30 @@ dropdownItems.forEach(item => {
 });
 
 // Send message function - ensure tutorMode is passed
-async function sendMessage(message) {
-    const res = await fetch('/chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-            message: message, 
-            chatId: chatId, 
-            tutorMode: isTutorModeOn,
-        }),
-    });
-    const data = await res.json();
-    return data.response;
+async function sendMessage(message) { 
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+            credentials: 'include', // Include cookies in the request
+        });
+
+        if (response.status === 401) {
+            // User is not authenticated, redirect to login page
+            window.location.href = '/login';
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.response;
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
 }
 
 // Handle clicking the attach icon to trigger the file input
@@ -93,7 +103,19 @@ attachIcon.addEventListener('click', () => {
 
 // Load existing chats from history and categorize them
 async function loadChatHistory() {
-    const res = await fetch('/chats');
+    const res = await fetch('/chats', {
+        credentials: 'include', // Include cookies in the request
+    });
+
+    if (response.status === 401) {
+        window.location.href = '/login';
+        return;
+    }
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const chats = await res.json();
 
     chatHistoryList.innerHTML = ''; // Clear the existing list
@@ -842,21 +864,36 @@ async function sendMessageWithImage(message, imageFile) {
         formData.append('image', imageFile);
     }
 
-    const res = await fetch('/chat', {
-        method: 'POST',
-        body: formData,
-    });
+    try {
+        const res = await fetch('/chat', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include', // Include cookies in the request
+        });
 
-    const data = await res.json();
+        if (res.status === 401) {
+            // User is not authenticated, redirect to login page
+            window.location.href = '/login';
+            return;
+        }
 
-    // You can access total_image_count and total_image_size here
-    console.log('Total Images:', data.total_image_count);
-    console.log('Total Image Size:', data.total_image_size);
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
 
-    // Optionally, update the UI with this information
-    updateImageStats(data.total_image_count, data.total_image_size);
+        const data = await res.json();
 
-    return data.response;
+        // Access total_image_count and total_image_size
+        console.log('Total Images:', data.total_image_count);
+        console.log('Total Image Size:', data.total_image_size);
+
+        // Optionally, update the UI with this information
+        updateImageStats(data.total_image_count, data.total_image_size);
+
+        return data.response;
+    } catch (error) {
+        console.error('Error sending message with image:', error);
+    }
 }
 
 // Load the chat history when the page loads
