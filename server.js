@@ -16,8 +16,6 @@ const textract = require('textract');
 const { htmlToText } = require('html-to-text');
 const mime = require('mime-types');
 const removeMarkdown = require('remove-markdown');
-const passport = require('passport');
-const OIDCStrategy = require('passport-azure-ad').OIDCStrategy;
 
 
 
@@ -33,14 +31,25 @@ const openai = new OpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
 });
 
-function ensureAuthenticated(req, res, next) {
-    if (req.isAuthenticated()) { 
-        return next(); 
+function getUserInfo(req, res, next) {
+    const header = req.headers['x-ms-client-principal'];
+    if (header) {
+        const buffer = Buffer.from(header, 'base64');
+        const user = JSON.parse(buffer.toString('ascii'));
+        req.user = user;
+    }
+    next();
+}
+
+app.use(getUserInfo);
+
+  function ensureAuthenticated(req, res, next) {
+    if (req.user) {
+        return next();
     }
 
     // Check for AJAX request using X-Requested-With header
     if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
-        // Respond with 401 Unauthorized for AJAX requests
         res.status(401).json({ error: 'Unauthorized' });
     } else {
         // Redirect to login for normal browser requests
@@ -58,42 +67,6 @@ app.use(session({
         maxAge: 24 * 60 * 60 * 1000, // Cookie expiration
     },
 }));
-
-const config = {
-    identityMetadata: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0/.well-known/openid-configuration`,
-    clientID: process.env.AZURE_CLIENT_ID,
-    clientSecret: process.env.AZURE_CLIENT_SECRET,
-    responseType: 'code id_token',
-    responseMode: 'form_post',
-    redirectUrl: process.env.OIDC_REDIRECT_URL,
-    allowHttpForRedirectUrl: false, // Set to false since we're using HTTPS
-    validateIssuer: false,
-    passReqToCallback: false,
-    scope: ['profile', 'email', 'offline_access'],
-    loggingLevel: 'info',
-};
-
-passport.use(new OIDCStrategy(config,
-    function(iss, sub, profile, accessToken, refreshToken, done) {
-        if (!profile.oid) {
-            return done(new Error("No oid found"), null);
-        }
-        // User authentication successful, proceed to store user info
-        return done(null, profile);
-    }
-));
-
-// Serialize and deserialize user instances to and from the session
-passport.serializeUser(function(user, done) {
-    done(null, user);
-});
-
-passport.deserializeUser(function(obj, done) {
-    done(null, obj);
-});
-
-app.use(passport.initialize());
-app.use(passport.session());
 
 app.get('/session-secret', (req, res) => {
     res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
@@ -174,8 +147,8 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
     const file = req.file;
     const chatId = req.body.chatId;
 
-    // Get username from the authenticated user
-    const username = req.user.displayName || req.user.upn || req.user.email;
+    // Get userId from the authenticated user
+    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'Anonymous';
 
     if (!file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -186,7 +159,7 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
     }
 
     // Validate that the chatId belongs to the current user
-    if (!chatId.startsWith(`${username}_chat_`)) {
+    if (!chatId.startsWith(`${userId}_chat_`)) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
 
@@ -303,14 +276,14 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
     const { message, tutorMode } = req.body;
     const file = req.file;
 
-    // Get username from the authenticated user
-    const username = req.user.displayName || req.user.upn || req.user.email;
+    // Get userId from the authenticated user
+    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'anonymous';
 
     // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
     if (!chatId) {
         const randomNumber = Math.random().toString(36).substr(2, 9);  // Generate a unique number
-        chatId = `${username}_chat_${randomNumber}`;  // Format: "username_chat_number"
+        chatId = `${userId}_chat_${randomNumber}`;  // Format: "userId_chat_number"
     }
 
     // Validate that either a message or file is present
@@ -564,8 +537,8 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
 // Endpoint to get the list of chat sessions with categories
 app.get('/chats', ensureAuthenticated, async (req, res) => {
     try {
-        // Get username from the authenticated user
-        const username = req.user.displayName || req.user.upn || req.user.email;
+        // Get userId from the authenticated user
+        const userId = req.user && req.user.userDetails ? req.user.userDetails : 'Anonymous';
 
         // Query for all chats
         const querySpec = {
@@ -577,7 +550,7 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
         const categorizedChats = {};
 
         // Filter chats that belong to the current user
-        const filteredChats = chats.filter(chat => chat.id.startsWith(`${username}_chat_`));
+        const filteredChats = chats.filter(chat => chat.id.startsWith(`${userId}_chat_`));
 
         // Categorize the chats based on date
         filteredChats.forEach(chat => {
@@ -600,13 +573,27 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
     }
 });
 
+if (process.env.NODE_ENV === 'development') {
+    app.use((req, res, next) => {
+      req.user = {
+        userId: 'test-user-id',
+        userDetails: 'Test User',
+        userRoles: ['authenticated'],
+      };
+      next();
+    });
+  } else {
+    // Use the getUserInfo middleware in production
+    app.use(getUserInfo);
+  }
+
 // Endpoint to retrieve a specific chat history
 app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     const { chatId } = req.params;
-    const username = req.user.displayName || req.user.upn || req.user.email;
+    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'Anonymous';
 
     // Check if the chatId belongs to the current user
-    if (!chatId.startsWith(`${username}_chat_`)) {
+    if (!chatId.startsWith(`${userId}_chat_`)) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
 
@@ -656,27 +643,24 @@ deleteOldChats();
 // Schedule the old chat deletion to run every 24 hours
 setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
 
-// Route to start the authentication process
-app.get('/login', 
-    passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
-    function(req, res) {
-        res.redirect('/');
-    }
-);
+// Redirect to Azure's login page
+app.get('/login', (req, res) => {
+    res.redirect('/.auth/login/aad');
+  });
+  
+  // Redirect to Azure's logout page
+  app.get('/logout', (req, res) => {
+    res.redirect('/.auth/logout');
+  });
 
-// Callback route for Azure AD to redirect to
-app.post('/auth/openid/return', 
-    passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
-    function(req, res) {
-        // Successful authentication
-        res.redirect('/');
-    }
-);
+  app.get('/user-info', ensureAuthenticated, (req, res) => {
+    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'anonymous';
+    res.json({ userId });
+});
 
-// Route to handle logout
-app.get('/logout', function(req, res){
-    req.logout();
-    res.redirect('/');
+app.use((req, res, next) => {
+    console.log('Authenticated user:', req.user);
+    next();
 });
 
 // Start the server on the specified port
