@@ -323,11 +323,12 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
         // Retrieve existing chat history or create a new one
         let chat = await getChatHistory(chatId);
 
+        let isNewChat = false;
         if (!chat) {
-            const title = message ? message.slice(0, 50) : 'New Chat';
+            isNewChat = true;
             chat = {
                 id: chatId,
-                title,
+                title: 'New Chat', // Temporary title
                 messages: [],
                 timestamp: new Date().toISOString(), // Chat creation timestamp
                 total_tokens_used: 0,  // Initialize token counter
@@ -499,6 +500,42 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
 
         // Update timestamp for the overall chat
         chat.timestamp = new Date().toISOString();
+
+        // If this is a new chat, generate a title
+        if (isNewChat) {
+            // Generate chat title using OpenAI
+            const titlePrompt = [
+                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation.' },
+                { role: 'user', content: message }
+            ];
+
+            // Prepare payload for OpenAI
+            const titlePayload = {
+                model: 'gpt-4o',
+                messages: titlePrompt,
+            };
+
+            // Make API call to OpenAI
+            const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'api-key': process.env.AZURE_OPENAI_API_KEY,
+                },
+                body: JSON.stringify(titlePayload),
+            });
+
+            if (!titleResponse.ok) {
+                const errorText = await titleResponse.text();
+                console.error('Error from OpenAI API when generating title:', errorText);
+                // Proceed without updating the title
+            } else {
+                const titleData = await titleResponse.json();
+                const generatedTitle = titleData.choices[0].message.content.trim();
+                // Update the chat's title
+                chat.title = generatedTitle;
+            }
+        }
 
         // Upsert the chat document into Cosmos DB
         await upsertChatHistory(chat);
