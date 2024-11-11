@@ -13,8 +13,8 @@
 }
 
 .chat-window.collapsed {
-    max-width: calc(80vw);
-    margin: 0px 0px 0px auto;
+    max-width: calc(60vw);
+    margin: 0 auto;
     transition: margin 0.3s ease;
 }
 
@@ -64,6 +64,7 @@
     cursor: pointer;
     font-size: 24px;
     margin-right: 10px;
+    color: #909095 !important;
 }
 
 #send-btn {
@@ -71,6 +72,7 @@
     padding: 10px;
     cursor: pointer;
     font-size: 24px;
+    color: #909095 !important;
 }
 
 .sidebar {
@@ -131,7 +133,7 @@
 .collapse-icon.active,
 .new-chat-icon.active,
 .tutor-mode-icon.active {
-    color: #2b2b2b;
+    color: #909095;
 }
 
 .send-icon {
