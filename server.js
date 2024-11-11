@@ -37,9 +37,9 @@ function ensureAuthenticated(req, res, next) {
     if (req.isAuthenticated()) { 
         return next(); 
     }
-    
-    // Check if the request is an AJAX request
-    if (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1) {
+
+    // Check for AJAX request using X-Requested-With header
+    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
         // Respond with 401 Unauthorized for AJAX requests
         res.status(401).json({ error: 'Unauthorized' });
     } else {
