@@ -106,16 +106,20 @@ attachIcon.addEventListener('click', () => {
 // Load existing chats from history and categorize them
 async function loadChatHistory() {
     const res = await fetch('/chats', {
-        credentials: 'include', // Include cookies in the request
+        credentials: 'include',
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
     });
 
-    if (response.status === 401) {
+    if (res.status === 401) {
         window.location.href = '/login';
         return;
     }
 
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
     }
 
     const chats = await res.json();

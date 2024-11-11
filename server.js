@@ -66,7 +66,7 @@ const config = {
     responseType: 'code id_token',
     responseMode: 'form_post',
     redirectUrl: process.env.OIDC_REDIRECT_URL,
-    allowHttpForRedirectUrl: true,
+    allowHttpForRedirectUrl: false, // Set to false since we're using HTTPS
     validateIssuer: false,
     passReqToCallback: false,
     scope: ['profile', 'email', 'offline_access'],
