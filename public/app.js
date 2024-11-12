@@ -119,12 +119,34 @@ async function loadChatHistory() {
         // Append each chat item
         reversedChats.forEach(chat => {
             const chatItem = document.createElement('li');
-            chatItem.textContent = chat.title;
             chatItem.dataset.chatId = chat.chatId;
             chatItem.classList.add('chat-item');
 
-            // Load previous chat on click
-            chatItem.addEventListener('click', () => loadChat(chat.chatId));
+            // Create a span for the chat title
+            const chatTitle = document.createElement('span');
+            chatTitle.textContent = chat.title;
+            chatTitle.classList.add('chat-title');
+            chatTitle.addEventListener('click', () => loadChat(chat.chatId));
+
+            // Create the bin icon
+            const binIcon = document.createElement('i');
+            binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
+
+            // Add click event to bin icon
+            binIcon.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent the click from triggering the loadChat
+                deleteChat(chat.chatId);
+            });
+
+            // Append title and bin icon to chatItem
+            chatItem.appendChild(chatTitle);
+            chatItem.appendChild(binIcon);
+
+            // Check the visibility property and set display accordingly
+            if (chat.visibility !== 1 && chat.visibility !== undefined) {
+                chatItem.style.display = 'none';
+            }
+
             chatItems.appendChild(chatItem);
         });
 
@@ -201,6 +223,12 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 // Use the same text rendering method for normal text
                 const parsedText = marked.parse(part.trim());
                 messageText.innerHTML = parsedText;
+
+                // Add 'table' class to any tables
+                const tables = messageText.querySelectorAll('table');
+                tables.forEach(table => {
+                    table.classList.add('table');
+                });
 
                 messageBody.appendChild(messageText);
                 entireMessage += part.trim();
@@ -310,7 +338,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 }
 
 function generateChatId() {
-    const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret2';  // Retrieve session secret or set a default
+    const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret3';  // Retrieve session secret or set a default
     const randomNumber = Math.random().toString(36).substr(2, 9); 
     return `${sessionSecret}_chat_${randomNumber}`; 
 }
@@ -602,11 +630,11 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     let entireMessage = ''; // To store the entire message
 
     // Use regex to split the content into normal text and code blocks
-    const codeBlockRegex = /```([\s\S]*?)```/g;
+    const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
     const parts = rawResponseText.split(codeBlockRegex);
 
     parts.forEach((part, index) => {
-        if (index % 2 === 0) {
+        if (index % 3 === 0) {
             // Regular text part
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
@@ -615,15 +643,30 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const parsedText = marked.parse(part.trim());
             messageText.innerHTML = parsedText;
 
+            // Add 'table' class to any tables
+            const tables = messageText.querySelectorAll('table');
+            tables.forEach(table => {
+                table.classList.add('table');
+            });
+
             messageBody.appendChild(messageText);
             entireMessage += part.trim();
-        } else {
+        } else if (index % 3 === 1) {
+            // Capture language identifier
+            var language = part.trim();
+        } else if (index % 3 === 2) {
             // Code block part
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
             const codeElement = document.createElement('pre');
             const codeContent = document.createElement('code');
+
+            // Set the appropriate language class if language was detected
+            if (language) {
+                codeContent.classList.add(`language-${language}`);
+            }
+
             codeContent.textContent = part.trim();
             codeElement.appendChild(codeContent);
 
@@ -821,6 +864,43 @@ async function sendMessageWithImage(message, imageFile) {
     updateImageStats(data.total_image_count, data.total_image_size);
 
     return data.response;
+}
+
+async function updateChatsVisibility() {
+    const querySpec = {
+        query: 'SELECT * FROM c WHERE NOT IS_DEFINED(c.visibility)',
+    };
+
+    const { resources: chats } = await container.items.query(querySpec).fetchAll();
+
+    for (const chat of chats) {
+        chat.visibility = 1;
+        await container.items.upsert(chat);
+    }
+}
+
+// Call the function
+updateChatsVisibility().then(() => {
+    console.log('Updated visibility for existing chats.');
+}).catch(error => {
+    console.error('Error updating chats:', error);
+});
+
+function deleteChat(chatId) {
+    fetch(`/chats/${chatId}`, {
+        method: 'DELETE',
+    })
+    .then(response => {
+        if (response.ok) {
+            // Reload the chat history to reflect the changes
+            loadChatHistory();
+        } else {
+            console.error('Failed to delete chat');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting chat:', error);
+    });
 }
 
 // Load the chat history when the page loads
