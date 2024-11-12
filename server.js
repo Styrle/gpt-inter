@@ -31,14 +31,14 @@ const openai = new OpenAI({
 });
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret2',
+    secret: process.env.SESSION_SECRET || 'defaultSecret3',
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false } 
 }));
 
 app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.session.secret || 'defaultSecret2' });
+    res.json({ secret: req.session.secret || 'defaultSecret3' });
 });
 
 app.use(express.json());
@@ -498,7 +498,7 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 app.get('/chats', async (req, res) => {
     try {
         // Get session secret or default
-        const sessionSecret = req.session.secret || 'defaultSecret2';
+        const sessionSecret = req.session.secret || 'defaultSecret3';
 
         // Query for all chats
         const querySpec = {

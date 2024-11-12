@@ -202,17 +202,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 const parsedText = marked.parse(part.trim());
                 messageText.innerHTML = parsedText;
 
-                // After setting messageText.innerHTML = parsedText, render any LaTeX
-                renderMathInElement(messageText, {
-                    delimiters: [
-                        { left: "$$", right: "$$", display: true },    // For block equations
-                        { left: "$", right: "$", display: false },     // For inline equations
-                        { left: "\\[", right: "\\]", display: true },  // For block equations (escaped)
-                        { left: "\\(", right: "\\)", display: false }  // For inline equations (escaped)
-                    ],
-                    throwOnError: false
-                });
-
                 messageBody.appendChild(messageText);
                 entireMessage += part.trim();
             } else if (index % 3 === 1) {
@@ -596,17 +585,6 @@ function streamParsedResponse(messageContent, rawResponseText) {
             // Update the messageText content
             messageText.innerHTML = marked.parse(accumulatedText);
 
-            // Apply KaTeX rendering for LaTeX equations
-            renderMathInElement(messageText, {
-                delimiters: [
-                    { left: "$$", right: "$$", display: true },
-                    { left: "$", right: "$", display: false },
-                    { left: "\\[", right: "\\]", display: true },   // Added for block equations
-                    { left: "\\(", right: "\\)", display: false }   // Added for inline equations
-                ],
-                throwOnError: false
-            });
-
             chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
         } else {
             clearInterval(wordInterval);
@@ -636,17 +614,6 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             // Parse the text with Markdown
             const parsedText = marked.parse(part.trim());
             messageText.innerHTML = parsedText;
-
-            // Apply KaTeX rendering for LaTeX equations
-            renderMathInElement(messageText, {
-                delimiters: [
-                    { left: "$$", right: "$$", display: true },
-                    { left: "$", right: "$", display: false },
-                    { left: "\\[", right: "\\]", display: true },   // Added for block equations
-                    { left: "\\(", right: "\\)", display: false }   // Added for inline equations
-                ],
-                throwOnError: false
-            });
 
             messageBody.appendChild(messageText);
             entireMessage += part.trim();
@@ -705,8 +672,6 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         });
     });
 }
-
-
 
 // Function to reset the input height after sending a message
 function resetInputHeight() {
@@ -797,7 +762,6 @@ chatInput.addEventListener('keydown', async (event) => {
         }
     }
 });
-
 
 // Function to show the welcome screen
 function showWelcomeScreen() {
