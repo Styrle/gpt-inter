@@ -30,6 +30,8 @@
     "node-fetch": "^3.3.2",
     "npm": "^10.9.0",
     "openai": "^4.67.3",
+    "passport": "^0.7.0",
+    "passport-azure-ad": "^4.3.5",
     "path": "^0.12.7",
     "pdf-parse": "^1.1.1",
     "remove-markdown": "^0.5.5",

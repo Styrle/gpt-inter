@@ -70,20 +70,32 @@ dropdownItems.forEach(item => {
 });
 
 // Send message function - ensure tutorMode is passed
-async function sendMessage(message) {
-    const res = await fetch('/chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-            message: message, 
-            chatId: chatId, 
-            tutorMode: isTutorModeOn,
-        }),
-    });
-    const data = await res.json();
-    return data.response;
+async function sendMessage(message) { 
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest', // Add this header
+            },
+            body: JSON.stringify({ message, chatId, tutorMode: isTutorModeOn }),
+            credentials: 'include',
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.response;
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
 }
 
 // Handle clicking the attach icon to trigger the file input
@@ -91,30 +103,48 @@ attachIcon.addEventListener('click', () => {
     //fileUpload.click(); // Manually trigger the file input
 });
 
+function isDevelopment() {
+    return window.location.hostname === 'localhost';
+}
+
 // Load existing chats from history and categorize them
 async function loadChatHistory() {
-    const res = await fetch('/chats');
-    const chats = await res.json();
+    try {
+        const res = await fetch('/chats', {
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+          });
 
-    chatHistoryList.innerHTML = ''; // Clear the existing list
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
 
-    // Define the desired category order, with 'Today' at the top
-    const orderedCategories = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+  
+      const chats = await res.json();
 
-    // Filter only the categories that are present in the fetched chats
-    const availableCategories = orderedCategories.filter(category => chats[category]);
+        chatHistoryList.innerHTML = ''; // Clear the existing list
 
-    // Loop through the ordered categories and render the chat items
-    availableCategories.forEach(category => {
-        const categoryItem = document.createElement('li');
-        categoryItem.textContent = category;
-        categoryItem.classList.add('chat-category-list');
-        chatHistoryList.appendChild(categoryItem);
+        // Define the desired category order, with 'Today' at the top
+        const orderedCategories = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
 
-        const chatItems = document.createElement('ul');
+        // Filter only the categories that are present in the fetched chats
+        const availableCategories = orderedCategories.filter(category => chats[category]);
 
-        // Reverse the chats for each category to show most recent first
-        const reversedChats = chats[category].slice().reverse();
+        // Loop through the ordered categories and render the chat items
+        availableCategories.forEach(category => {
+            const categoryItem = document.createElement('li');
+            categoryItem.textContent = category;
+            categoryItem.classList.add('chat-category-list');
+            chatHistoryList.appendChild(categoryItem);
+
+            const chatItems = document.createElement('ul');
 
         // Append each chat item
         reversedChats.forEach(chat => {
@@ -149,9 +179,26 @@ async function loadChatHistory() {
 
             chatItems.appendChild(chatItem);
         });
+            // Reverse the chats for each category to show most recent first
+            const reversedChats = chats[category].slice().reverse();
 
-        chatHistoryList.appendChild(chatItems);
-    });
+            // Append each chat item
+            reversedChats.forEach(chat => {
+                const chatItem = document.createElement('li');
+                chatItem.textContent = chat.title;
+                chatItem.dataset.chatId = chat.chatId;
+                chatItem.classList.add('chat-item');
+
+                // Load previous chat on click
+                chatItem.addEventListener('click', () => loadChat(chat.chatId));
+                chatItems.appendChild(chatItem);
+            });
+
+            chatHistoryList.appendChild(chatItems);
+        });
+    } catch (error) {
+        console.error('Error loading chat history:', error);
+    }
 }
 
 // Function to load a previous chat by chatId
@@ -338,10 +385,10 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 }
 
 function generateChatId() {
-    const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret3';  // Retrieve session secret or set a default
-    const randomNumber = Math.random().toString(36).substr(2, 9); 
-    return `${sessionSecret}_chat_${randomNumber}`; 
-}
+    const userId = sessionStorage.getItem('userId') || 'anonymous';
+    const randomNumber = Math.random().toString(36).substr(2, 9);
+    return `${userId}_chat_${randomNumber}`;
+  }
 
 let selectedImageFile = null;
 
@@ -871,21 +918,37 @@ async function sendMessageWithImage(message, imageFile) {
         formData.append('image', imageFile);
     }
 
-    const res = await fetch('/chat', {
-        method: 'POST',
-        body: formData,
-    });
+    try {
+        const res = await fetch('/chats', {
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+          });
 
-    const data = await res.json();
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
 
-    // You can access total_image_count and total_image_size here
-    console.log('Total Images:', data.total_image_count);
-    console.log('Total Image Size:', data.total_image_size);
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
 
-    // Optionally, update the UI with this information
-    updateImageStats(data.total_image_count, data.total_image_size);
+        const data = await res.json();
 
-    return data.response;
+        // Access total_image_count and total_image_size
+        console.log('Total Images:', data.total_image_count);
+        console.log('Total Image Size:', data.total_image_size);
+
+        // Optionally, update the UI with this information
+        updateImageStats(data.total_image_count, data.total_image_size);
+
+        return data.response;
+    } catch (error) {
+        console.error('Error sending message with image:', error);
+    }
 }
 
 async function updateChatsVisibility() {
@@ -927,11 +990,34 @@ function deleteChat(chatId) {
 
 // Load the chat history when the page loads
 window.onload = async () => {
-    const response = await fetch('/session-secret');
-    const data = await response.json();
-    sessionStorage.setItem('sessionSecret', data.secret);  // Store session secret in sessionStorage
-    chatId = sessionStorage.getItem('chatId') || generateChatId();
-    sessionStorage.setItem('chatId', chatId);
-    loadChatHistory();  // Load chats that belong to the secret
-    showWelcomeScreen();
+    try {
+        const response = await fetch('/user-info', {
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        sessionStorage.setItem('userId', data.userId);
+
+        chatId = sessionStorage.getItem('chatId') || generateChatId();
+        sessionStorage.setItem('chatId', chatId);
+
+        loadChatHistory();  // Load chats that belong to the user
+        showWelcomeScreen();
+    } catch (error) {
+        console.error('Error fetching user info:', error);
+        window.location.href = '/login'; // Redirect to login on error
+    }
 };
