@@ -554,11 +554,7 @@ sendBtn.addEventListener('click', async () => {
 
             const messageContent = loadingMessageElement.querySelector('.message-content');
 
-            // Remove the loading dots
-            const loadingDots = messageContent.querySelector('.loading-dots');
-            if (loadingDots) {
-                loadingDots.remove();
-            }
+            // **Removed the code that was removing loading dots here**
 
             // Stream the raw AI response text
             streamParsedResponse(messageContent, response);
@@ -616,6 +612,12 @@ function streamParsedResponse(messageContent, rawResponseText) {
             chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
         } else {
             clearInterval(wordInterval);
+
+            // **Remove the loading dots here**
+            const loadingDots = messageBody.querySelector('.loading-dots');
+            if (loadingDots) {
+                loadingDots.remove();
+            }
 
             // After streaming is complete, re-render the message to handle code blocks
             reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
@@ -736,6 +738,30 @@ function autoGrowInput() {
     }
 }
 
+// Existing event listener for input event
+chatInput.addEventListener('input', () => {
+    // Automatically grow the input field as the user types
+    autoGrowInput();
+
+    // Change the color of the send button if input has content
+    if (chatInput.value.trim() !== '') {
+        sendBtn.classList.add('active');
+    } else {
+        sendBtn.classList.remove('active');
+    }
+});
+
+// **Add these event listeners for focus and blur events**
+chatInput.addEventListener('focus', () => {
+    sendBtn.classList.add('active');
+});
+
+chatInput.addEventListener('blur', () => {
+    if (chatInput.value.trim() === '') {
+        sendBtn.classList.remove('active');
+    }
+});
+
 chatInput.addEventListener('input', () => {
     // Automatically grow the input field as the user types
     autoGrowInput();
@@ -774,7 +800,7 @@ chatInput.addEventListener('keydown', async (event) => {
             }, 0);
 
             // Append an empty message with loading dots for AI
-            const loadingMessageElement = appendMessage('AI', '', true);
+            const loadingMessageElement = appendMessage('AI', '', null, true);
 
             try {
                 let response;
@@ -787,11 +813,7 @@ chatInput.addEventListener('keydown', async (event) => {
 
                 const messageContent = loadingMessageElement.querySelector('.message-content');
 
-                // Remove the loading dots
-                const loadingDots = messageContent.querySelector('.loading-dots');
-                if (loadingDots) {
-                    loadingDots.remove();
-                }
+                // **Removed the code that was removing loading dots here**
 
                 // Stream the AI response
                 streamParsedResponse(messageContent, response);

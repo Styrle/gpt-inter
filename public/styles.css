@@ -159,7 +159,7 @@
 }
 
 #send-btn.active {
-    color: #005DE8;
+    color: #005DE8 !important;
 }
 
 .no-bullets {
