@@ -110,30 +110,24 @@ function isDevelopment() {
 // Load existing chats from history and categorize them
 async function loadChatHistory() {
     try {
-      const res = await fetch('/chats', {
-        credentials: 'include',
-        headers: {
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      });
-  
-      if (res.status === 401) {
-        if (isDevelopment()) {
-          // In development, simulate login
-          await fetch('/login');
-          loadChatHistory(); // Retry after login
-        } else {
-          window.location.href = '/login';
+        const res = await fetch('/chats', {
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
         }
-        return;
-      }
-  
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
-  
-      const chats = await res.json();
+
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
+        const chats = await res.json();
 
         chatHistoryList.innerHTML = ''; // Clear the existing list
 
