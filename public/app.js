@@ -367,6 +367,7 @@ function generateChatId() {
     const randomNumber = Math.random().toString(36).substr(2, 9);
     return `${userId}_chat_${randomNumber}`;
 }
+
 let selectedImageFile = null;
 
 // Handle file upload and sending message

@@ -34,9 +34,38 @@ const openai = new OpenAI({
 function getUserInfo(req, res, next) {
     const header = req.headers['x-ms-client-principal'];
     if (header) {
-        const buffer = Buffer.from(header, 'base64');
-        const user = JSON.parse(buffer.toString('ascii'));
-        req.user = user;
+        try {
+            const buffer = Buffer.from(header, 'base64');
+            const user = JSON.parse(buffer.toString('ascii'));
+
+            // Extract email from claims
+            if (user && user.claims) {
+                const emailClaim = user.claims.find(claim => claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress');
+                if (emailClaim) {
+                    user.email = emailClaim.val;
+                } else {
+                    console.error('Email claim not found in user claims');
+                }
+
+                const nameClaim = user.claims.find(claim => 
+                    claim.typ === 'name' || 
+                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                );
+                if (nameClaim) {
+                    user.name = nameClaim.val;
+                }
+
+                // You can also extract other claims as needed
+            } else {
+                console.error('User claims not found');
+            }
+
+            req.user = user;
+        } catch (error) {
+            console.error('Error parsing x-ms-client-principal header:', error);
+        }
+    } else {
+        console.error('x-ms-client-principal header not found');
     }
     next();
 }
@@ -160,7 +189,13 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
     const chatId = req.body.chatId;
 
     // Get userId from the authenticated user
-    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'Anonymous';
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
+
+    if (!req.user || !req.user.email) {
+        console.error('User not authenticated or email not found');
+        return res.status(401).json({ error: 'User not authenticated' });
+    }
+
 
     if (!file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -289,7 +324,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
     const file = req.file;
 
     // Get userId from the authenticated user
-    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'anonymous';
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
     // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
@@ -688,7 +723,7 @@ if (isDevelopment) {
   }
 
   app.get('/user-info', ensureAuthenticated, (req, res) => {
-    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'anonymous';
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
     res.json({ userId });
 });
 
