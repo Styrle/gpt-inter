@@ -146,6 +146,8 @@ async function loadChatHistory() {
 
             const chatItems = document.createElement('ul');
 
+            const reversedChats = chats[category].slice().reverse();
+
         // Append each chat item
         reversedChats.forEach(chat => {
             const chatItem = document.createElement('li');
@@ -179,20 +181,6 @@ async function loadChatHistory() {
 
             chatItems.appendChild(chatItem);
         });
-            // Reverse the chats for each category to show most recent first
-            const reversedChats = chats[category].slice().reverse();
-
-            // Append each chat item
-            reversedChats.forEach(chat => {
-                const chatItem = document.createElement('li');
-                chatItem.textContent = chat.title;
-                chatItem.dataset.chatId = chat.chatId;
-                chatItem.classList.add('chat-item');
-
-                // Load previous chat on click
-                chatItem.addEventListener('click', () => loadChat(chat.chatId));
-                chatItems.appendChild(chatItem);
-            });
 
             chatHistoryList.appendChild(chatItems);
         });
