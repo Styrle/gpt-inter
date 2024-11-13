@@ -18,6 +18,7 @@ const mime = require('mime-types');
 const removeMarkdown = require('remove-markdown');
 
 
+
 // Load environment variables from .env file
 dotenv.config();
 
@@ -30,15 +31,150 @@ const openai = new OpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
 });
 
+async function getUserInfo(req, res, next) {
+    const header = req.headers['x-ms-client-principal'];
+
+    if (header) {
+        try {
+            const buffer = Buffer.from(header, 'base64');
+            const user = JSON.parse(buffer.toString('ascii'));
+
+            // Extract email from claims
+            if (user && user.claims) {
+                const emailClaim = user.claims.find(claim => claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress');
+                if (emailClaim) {
+                    user.email = emailClaim.val;
+                } else {
+                    console.error('Email claim not found in user claims');
+                }
+
+                const nameClaim = user.claims.find(claim =>
+                    claim.typ === 'name' ||
+                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                );
+                if (nameClaim) {
+                    user.name = nameClaim.val;
+                }
+            } else {
+                console.error('User claims not found');
+            }
+
+            req.user = user;
+            next();
+        } catch (error) {
+            console.error('Error parsing x-ms-client-principal header:', error);
+            next();
+        }
+    } else {
+        console.error('x-ms-client-principal header not found');
+
+        // Fetch user info from /.auth/me
+        (async () => {
+            try {
+                const authMeResponse = await fetch(`https://${req.get('host')}/.auth/me`, {
+                    headers: {
+                        'Cookie': req.headers['cookie'],
+                    },
+                });
+
+                if (authMeResponse.ok) {
+                    const data = await authMeResponse.json();
+                    if (data.length > 0 && data[0].user_claims) {
+                        const user = {
+                            claims: data[0].user_claims,
+                        };
+
+                        // Extract email from claims
+                        const emailClaim = user.claims.find(claim => claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress');
+                        if (emailClaim) {
+                            user.email = emailClaim.val;
+                        } else {
+                            console.error('Email claim not found in user claims from /.auth/me');
+                        }
+
+                        const nameClaim = user.claims.find(claim =>
+                            claim.typ === 'name' ||
+                            claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                        );
+                        if (nameClaim) {
+                            user.name = nameClaim.val;
+                        }
+
+                        req.user = user;
+                    } else {
+                        console.error('No user claims found in /.auth/me response');
+                    }
+                } else {
+                    console.error('Failed to fetch /.auth/me:', authMeResponse.statusText);
+                }
+            } catch (error) {
+                console.error('Error fetching /.auth/me:', error);
+            }
+            next();
+        })();
+    }
+}
+
 app.use(session({
     secret: process.env.SESSION_SECRET || 'defaultSecret2',
     resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false } 
+    saveUninitialized: false,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000, // Cookie expiration
+    },
 }));
 
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+if (isDevelopment) {
+  // Mock authentication middleware for development
+  app.use((req, res, next) => {
+    if (req.session && req.session.user) {
+      req.user = req.session.user;
+    } else {
+      req.user = {
+        email: 'test@example.com',
+        name: 'Test User',
+        userRoles: ['authenticated'],
+      };
+      req.session.user = req.user;
+    }
+    next();
+  });
+} else {
+  // Use the getUserInfo middleware in production
+  app.use(getUserInfo);
+}
+
+
+function ensureAuthenticated(req, res, next) {
+    if (req.user && req.user.email) {
+      return next();
+    }
+  
+    // Handle unauthenticated access
+    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
+      res.status(401).json({ error: 'Unauthorized' });
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        // In development, simulate authentication
+        req.user = {
+          email: 'test@example.com',
+          name: 'Test User',
+          userRoles: ['authenticated'],
+        };
+        return next();
+      } else {
+        // In production, redirect to login
+        res.redirect('/login');
+      }
+    }
+  }
+
 app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.session.secret || 'defaultSecret2' });
+    res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
 });
 
 app.use(express.json());
@@ -51,9 +187,10 @@ const client = new CosmosClient({
 
 app.use(helmet({
     contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'", "chrome-extension:"],
-        scriptSrc: ["'self'", "chrome-extension:"],
+        directives: {
+            defaultSrc: ["'self'", "https://login.microsoftonline.com"],
+            scriptSrc: ["'self'", "https://login.microsoftonline.com"],
+            connectSrc: ["'self'", "https://login.microsoftonline.com"],
       },
     },
   }));
@@ -111,9 +248,18 @@ function categorizeChat(timestamp) {
 }
 
 // Endpoint to handle file uploads and extract content
-app.post('/upload', upload.single('file'), async (req, res) => {
+app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res) => {
     const file = req.file;
     const chatId = req.body.chatId;
+
+    // Get userId from the authenticated user
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
+
+    if (!req.user || !req.user.email) {
+        console.error('User not authenticated or email not found');
+        return res.status(401).json({ error: 'User not authenticated' });
+    }
+
 
     if (!file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -121,6 +267,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     if (!chatId) {
         return res.status(400).json({ error: 'Missing chatId' });
+    }
+
+    // Validate that the chatId belongs to the current user
+    if (!chatId.startsWith(`${userId}_chat_`)) {
+        return res.status(403).json({ error: 'Unauthorized' });
     }
 
     try {
@@ -232,18 +383,18 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
 
 // Endpoint to handle user messages and interact with OpenAI
-app.post('/chat', upload.single('image'), async (req, res) => {
+app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) => {
     const { message, tutorMode } = req.body;
     const file = req.file;
 
-    // Retrieve session secret from the session or use a default
-    const sessionSecret = req.session.secret || 'defaultSecret3';
+    // Get userId from the authenticated user
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
     // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
     if (!chatId) {
         const randomNumber = Math.random().toString(36).substr(2, 9);  // Generate a unique number
-        chatId = `${sessionSecret}_chat_${randomNumber}`;  // Format: "secret_chat_number"
+        chatId = `${userId}_chat_${randomNumber}`;  // Format: "userId_chat_number"
     }
 
     // Validate that either a message or file is present
@@ -495,10 +646,10 @@ app.post('/chat', upload.single('image'), async (req, res) => {
 });
 
 // Endpoint to get the list of chat sessions with categories
-app.get('/chats', async (req, res) => {
+app.get('/chats', ensureAuthenticated, async (req, res) => {
     try {
-        // Get session secret or default
-        const sessionSecret = req.session.secret || 'defaultSecret2';
+        // Get userId from the authenticated user
+        const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
         // Query for all chats
         const querySpec = {
@@ -509,8 +660,8 @@ app.get('/chats', async (req, res) => {
 
         const categorizedChats = {};
 
-        // Filter chats that belong to the current session secret
-        const filteredChats = chats.filter(chat => chat.id.startsWith(`${sessionSecret}_chat_`));
+        // Filter chats that belong to the current user
+        const filteredChats = chats.filter(chat => chat.id.startsWith(`${userId}_chat_`));
 
         // Categorize the chats based on date
         filteredChats.forEach(chat => {
@@ -534,8 +685,14 @@ app.get('/chats', async (req, res) => {
 });
 
 // Endpoint to retrieve a specific chat history
-app.get('/chats/:chatId', async (req, res) => {
+app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     const { chatId } = req.params;
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
+
+    // Check if the chatId belongs to the current user
+    if (!chatId.startsWith(`${userId}_chat_`)) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
 
     try {
         const chat = await getChatHistory(chatId);
@@ -582,6 +739,45 @@ deleteOldChats();
 
 // Schedule the old chat deletion to run every 24 hours
 setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
+
+if (isDevelopment) {
+    // Mock /login route for development
+    app.get('/login', (req, res) => {
+      // Simulate login by setting req.user
+      req.user = {
+        userId: 'test-user-id',
+        userDetails: 'Test User',
+        userRoles: ['authenticated'],
+      };
+      res.redirect('/');
+    });
+  
+    // Mock /logout route for development
+    app.get('/logout', (req, res) => {
+      // Simulate logout by clearing req.user
+      req.user = null;
+      res.redirect('/');
+    });
+  } else {
+    // Production routes
+    app.get('/login', (req, res) => {
+      res.redirect('/.auth/login/aad');
+    });
+  
+    app.get('/logout', (req, res) => {
+      res.redirect('/.auth/logout');
+    });
+  }
+
+  app.get('/user-info', ensureAuthenticated, (req, res) => {
+    const userId = req.user.email;
+    res.json({ userId });
+});
+
+app.use((req, res, next) => {
+    console.log('Authenticated user:', req.user);
+    next();
+  });
 
 // Start the server on the specified port
 app.listen(port, () => {
