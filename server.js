@@ -31,8 +31,9 @@ const openai = new OpenAI({
     apiKey: process.env.AZURE_OPENAI_API_KEY,
 });
 
-function getUserInfo(req, res, next) {
+async function getUserInfo(req, res, next) {
     const header = req.headers['x-ms-client-principal'];
+
     if (header) {
         try {
             const buffer = Buffer.from(header, 'base64');
@@ -47,39 +48,99 @@ function getUserInfo(req, res, next) {
                     console.error('Email claim not found in user claims');
                 }
 
-                const nameClaim = user.claims.find(claim => 
-                    claim.typ === 'name' || 
+                const nameClaim = user.claims.find(claim =>
+                    claim.typ === 'name' ||
                     claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
                 );
                 if (nameClaim) {
                     user.name = nameClaim.val;
                 }
-
-                // You can also extract other claims as needed
             } else {
                 console.error('User claims not found');
             }
 
             req.user = user;
+            next();
         } catch (error) {
             console.error('Error parsing x-ms-client-principal header:', error);
+            next();
         }
     } else {
         console.error('x-ms-client-principal header not found');
+
+        // Fetch user info from /.auth/me
+        (async () => {
+            try {
+                const authMeResponse = await fetch(`https://${req.get('host')}/.auth/me`, {
+                    headers: {
+                        'Cookie': req.headers['cookie'],
+                    },
+                });
+
+                if (authMeResponse.ok) {
+                    const data = await authMeResponse.json();
+                    if (data.length > 0 && data[0].user_claims) {
+                        const user = {
+                            claims: data[0].user_claims,
+                        };
+
+                        // Extract email from claims
+                        const emailClaim = user.claims.find(claim => claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress');
+                        if (emailClaim) {
+                            user.email = emailClaim.val;
+                        } else {
+                            console.error('Email claim not found in user claims from /.auth/me');
+                        }
+
+                        const nameClaim = user.claims.find(claim =>
+                            claim.typ === 'name' ||
+                            claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                        );
+                        if (nameClaim) {
+                            user.name = nameClaim.val;
+                        }
+
+                        req.user = user;
+                    } else {
+                        console.error('No user claims found in /.auth/me response');
+                    }
+                } else {
+                    console.error('Failed to fetch /.auth/me:', authMeResponse.statusText);
+                }
+            } catch (error) {
+                console.error('Error fetching /.auth/me:', error);
+            }
+            next();
+        })();
     }
-    next();
 }
+
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'defaultSecret2',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000, // Cookie expiration
+    },
+}));
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 
 if (isDevelopment) {
   // Mock authentication middleware for development
   app.use((req, res, next) => {
-    req.user = {
-      userId: 'test-user-id',
-      userDetails: 'Test User',
-      userRoles: ['authenticated'],
-    };
+    if (req.session && req.session.user) {
+      req.user = req.session.user;
+    } else {
+      req.user = {
+        email: 'test@example.com',
+        name: 'Test User',
+        userRoles: ['authenticated'],
+      };
+      req.session.user = req.user;
+    }
     next();
   });
 } else {
@@ -93,15 +154,15 @@ function ensureAuthenticated(req, res, next) {
       return next();
     }
   
-    // Check for AJAX request
+    // Handle unauthenticated access
     if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
       res.status(401).json({ error: 'Unauthorized' });
     } else {
       if (process.env.NODE_ENV === 'development') {
         // In development, simulate authentication
         req.user = {
-          userId: 'test-user-id',
-          userDetails: 'Test User',
+          email: 'test@example.com',
+          name: 'Test User',
           userRoles: ['authenticated'],
         };
         return next();
@@ -111,17 +172,6 @@ function ensureAuthenticated(req, res, next) {
       }
     }
   }
-
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret2',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { 
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // Cookie expiration
-    },
-}));
 
 app.get('/session-secret', (req, res) => {
     res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
@@ -599,7 +649,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
 app.get('/chats', ensureAuthenticated, async (req, res) => {
     try {
         // Get userId from the authenticated user
-        const userId = req.user && req.user.userDetails ? req.user.userDetails : 'Anonymous';
+        const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
         // Query for all chats
         const querySpec = {
@@ -637,7 +687,7 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
 // Endpoint to retrieve a specific chat history
 app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     const { chatId } = req.params;
-    const userId = req.user && req.user.userDetails ? req.user.userDetails : 'Anonymous';
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
     // Check if the chatId belongs to the current user
     if (!chatId.startsWith(`${userId}_chat_`)) {

@@ -113,10 +113,10 @@ async function loadChatHistory() {
         const res = await fetch('/chats', {
             credentials: 'include',
             headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
             },
-        });
+          });
 
         if (res.status === 401) {
             window.location.href = '/login';
@@ -126,8 +126,8 @@ async function loadChatHistory() {
         if (!res.ok) {
             throw new Error(`HTTP error! status: ${res.status}`);
         }
-
-        const chats = await res.json();
+  
+      const chats = await res.json();
 
         chatHistoryList.innerHTML = ''; // Clear the existing list
 
@@ -360,7 +360,7 @@ function generateChatId() {
     const userId = sessionStorage.getItem('userId') || 'anonymous';
     const randomNumber = Math.random().toString(36).substr(2, 9);
     return `${userId}_chat_${randomNumber}`;
-}
+  }
 
 let selectedImageFile = null;
 
@@ -879,14 +879,13 @@ async function sendMessageWithImage(message, imageFile) {
     }
 
     try {
-        const res = await fetch('/chat', {
-            method: 'POST',
-            body: formData,
+        const res = await fetch('/chats', {
             credentials: 'include',
             headers: {
-                'X-Requested-With': 'XMLHttpRequest', // Add this header
+              'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
             },
-        });
+          });
 
         if (res.status === 401) {
             window.location.href = '/login';
