@@ -70,12 +70,26 @@ function getUserInfo(req, res, next) {
     next();
 }
 
-app.use(getUserInfo);
+const isDevelopment = process.env.NODE_ENV === 'development';
 
+if (isDevelopment) {
+  // Mock authentication middleware for development
+  app.use((req, res, next) => {
+    req.user = {
+      userId: 'test-user-id',
+      userDetails: 'Test User',
+      userRoles: ['authenticated'],
+    };
+    next();
+  });
+} else {
+  // Use the getUserInfo middleware in production
+  app.use(getUserInfo);
+}
 
 
 function ensureAuthenticated(req, res, next) {
-    if (req.user) {
+    if (req.user && req.user.email) {
       return next();
     }
   
@@ -620,23 +634,6 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
     }
 });
 
-const isDevelopment = process.env.NODE_ENV === 'development';
-
-if (isDevelopment) {
-  // Mock authentication middleware for development
-  app.use((req, res, next) => {
-    req.user = {
-      userId: 'test-user-id',
-      userDetails: 'Test User',
-      userRoles: ['authenticated'],
-    };
-    next();
-  });
-} else {
-  // Use the getUserInfo middleware in production
-  app.use(getUserInfo);
-}
-
 // Endpoint to retrieve a specific chat history
 app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     const { chatId } = req.params;
@@ -723,14 +720,14 @@ if (isDevelopment) {
   }
 
   app.get('/user-info', ensureAuthenticated, (req, res) => {
-    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
+    const userId = req.user.email;
     res.json({ userId });
 });
 
 app.use((req, res, next) => {
     console.log('Authenticated user:', req.user);
     next();
-});
+  });
 
 // Start the server on the specified port
 app.listen(port, () => {
