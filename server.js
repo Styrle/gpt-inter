@@ -116,7 +116,7 @@ async function getUserInfo(req, res, next) {
 }
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret2',
+    secret: process.env.SESSION_SECRET || 'defaultSecret3',
     resave: false,
     saveUninitialized: false,
     cookie: { 
@@ -414,6 +414,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
             chat = {
                 id: chatId,
                 title: 'New Chat', // Temporary title
+                visibility: 1,     // Set visibility to 1 (visible)
                 messages: [],
                 timestamp: new Date().toISOString(), // Chat creation timestamp
                 total_tokens_used: 0,  // Initialize token counter
@@ -651,9 +652,9 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
         // Get userId from the authenticated user
         const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-        // Query for all chats
+        // Query for all chats including visibility
         const querySpec = {
-            query: 'SELECT c.id, c.title, c.timestamp FROM c',
+            query: 'SELECT c.id, c.title, c.timestamp, c.visibility FROM c',
         };
 
         const { resources: chats } = await container.items.query(querySpec).fetchAll();
@@ -674,6 +675,7 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
             categorizedChats[category].push({
                 chatId: chat.id,
                 title: chat.title,
+                visibility: chat.visibility, // Include visibility
             });
         });
 
@@ -705,6 +707,30 @@ app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     } catch (error) {
         console.error('Error retrieving chat:', error);
         res.status(500).json({ error: 'Failed to retrieve chat' });
+    }
+});
+
+app.delete('/chats/:chatId', async (req, res) => {
+    const { chatId } = req.params;
+
+    try {
+        // Retrieve the chat document
+        const { resource: chat } = await container.item(chatId, chatId).read();
+
+        if (chat) {
+            // Update visibility to 2 (not visible)
+            chat.visibility = 2;
+
+            // Upsert the chat document to update it in the database
+            await upsertChatHistory(chat);
+
+            res.json({ message: 'Chat visibility updated' });
+        } else {
+            res.status(404).json({ error: 'Chat not found' });
+        }
+    } catch (error) {
+        console.error('Error updating chat visibility:', error);
+        res.status(500).json({ error: 'Failed to update chat visibility' });
     }
 });
 
