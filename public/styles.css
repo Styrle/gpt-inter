@@ -1,9 +1,14 @@
 /* Reset CSS */
-
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
 .container {
     display: flex;
     height: 100vh;
+    
 }
 
 .chat-window {
@@ -34,6 +39,8 @@
     margin-bottom: 10px;
     padding: 10px;
 }
+
+
 
 #chat-input {
     width: 100%;
@@ -143,6 +150,7 @@
 .icon-container.active {
     background-color: #F7F8F9;
     width: 200px;
+    transition-delay: 150ms;
 }
 
 .collapse-icon.active,
@@ -221,6 +229,10 @@ ul.chat-category-list {
     color: #2b2b2b;
 }
 
+.user .message-content .message-body .message-text {
+    margin: 0;
+}
+
 .message.user {
     justify-content: flex-end;
 }
@@ -228,6 +240,18 @@ ul.chat-category-list {
 .message.ai {
     justify-content: flex-start;
    
+}
+
+.ai .message-content .message-body .message-text {
+    margin-left: 5px;
+}
+
+.ai .message-content .message-body .message-text ul {
+    margin: 10px auto;
+}
+
+.ai .message-content .message-body .message-text ol {
+    margin: 20px 0px 0px 40px;
 }
 
 .message-content {
@@ -251,9 +275,7 @@ ul.chat-category-list {
     
 }
 
-
 .ai-icon {
-    margin-top: 10px;
     width: 24px;
     height: 24px;
     margin-right: 10px;
@@ -454,6 +476,10 @@ pre code.hljs {
     transition: color 0.2s;
 }
 
+.ai .message-content .message-body .copy-button {
+    margin-left: 10px;
+}
+
 .copy-button:hover {
     color: #005DE8;
 }
@@ -564,13 +590,21 @@ pre code.hljs {
     background-color: #F4F5F7;
 }
 
+.code-block-container .code-copy-button {
+    color: #fff;
+}
+
+.code-block-container .code-copy-button:hover {
+    color: #005DE8; 
+}
+
 /* Styling for code blocks */
 .hljs-keyword {
     color: #2e95d3 !important;
 }
 
 .hljs {
-    color: #CBCCCF !important;
+    color: #fff !important;
 }
 
 .hljs-string {
@@ -586,9 +620,33 @@ pre code.hljs {
 }
 
 .hljs-attr {
-    color: #00a67d !important;
+    color: #df3079 !important;
 }
 
 .hljs-comment {
     color: #ffffff80 !important;
+}
+
+.hljs-tag {
+    color: #fff !important;
+}
+
+.hljs-name {
+    color: #fff !important;
+}
+
+.hljs-attribute {
+    color: #00a67d !important;
+}
+
+.hljs-variable {
+    color: #df3079 !important;
+}
+
+.hljs-symbol {
+    color: #f22c3d !important;
+}
+
+.hljs-built_in {
+    color: #e9950c !important;
 }
