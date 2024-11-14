@@ -636,6 +636,12 @@ function streamParsedResponse(messageContent, rawResponseText) {
         messageBody.appendChild(messageText);
     }
 
+    // **Remove loading dots as soon as content starts streaming**
+    const loadingDots = messageBody.querySelector('.loading-dots');
+    if (loadingDots) {
+        loadingDots.remove();
+    }
+
     const wordInterval = setInterval(() => {
         if (currentWordIndex < words.length) {
             accumulatedText += words[currentWordIndex];
@@ -647,12 +653,6 @@ function streamParsedResponse(messageContent, rawResponseText) {
             chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
         } else {
             clearInterval(wordInterval);
-
-            // **Remove the loading dots here**
-            const loadingDots = messageBody.querySelector('.loading-dots');
-            if (loadingDots) {
-                loadingDots.remove();
-            }
 
             // After streaming is complete, re-render the message to handle code blocks
             reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
