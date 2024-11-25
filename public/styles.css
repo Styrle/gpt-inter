@@ -51,9 +51,8 @@
     font-family: open sans;
     font-size: 12px;
     line-height: 1.4;
-    padding: 5px;
-    height: 30px; /* Default height */
-    overflow: hidden; /* Hide overflow initially */
+    height: 20px;
+    overflow: hidden;
     transition: height 0.2s ease; /* Smooth height transition */
 }
 
@@ -89,12 +88,22 @@
     margin-top: 3px;
 }
 
+.chat-item:focus .bin-icon {
+    outline: 2px solid #005DE8;
+    display: inline-block;
+    color: #888;
+    cursor: pointer;
+    margin-left: 8px;
+    margin-top: 3px;
+}
+
 #send-btn {
     margin-left: 10px;
     padding: 10px;
     cursor: pointer;
     font-size: 24px;
     color: #909095 !important;
+    border: none;
 }
 
 .sidebar {
@@ -216,6 +225,11 @@ ul {
 
 .chat-item:hover {
     background-color: #eff0f1;
+}
+
+.chat-item:focus {
+    outline: 2px solid #005DE8; /* Adjust color to match your theme */
+    background-color: #eff0f1; /* Optional: change background on focus */
 }
 
 ul.chat-category-list {
@@ -364,6 +378,22 @@ ul.chat-category-list {
     border-bottom: 2px solid #ddd;
   }
 
+  .display-formula {
+    text-align: center;
+    font-family: 'Times New Roman', serif;
+    font-size: 1.5em;
+    color: white;
+    background-color: black;
+    padding: 10px;
+    border-radius: 8px;
+    display: inline-block;
+  }
+  
+  .inline-formula {
+    font-family: 'Times New Roman', serif;
+    font-size: 1em;
+    color: black;
+  }
 
 /* Styling for the container of file uploads */
 .file-upload-container {
@@ -649,4 +679,36 @@ pre code.hljs {
 
 .hljs-built_in {
     color: #e9950c !important;
+}
+
+/* Accessible */
+:focus {
+    outline: 2px solid #005DE8; /* High-contrast focus indicator */
+}
+
+/* Ensure that the focus indicator is visible */
+button:focus, 
+input:focus, 
+textarea:focus {
+    outline: 2px solid #005DE8;
+    outline-offset: 2px;
+}
+
+/* High Contrast Mode Support */
+@media (prefers-contrast: high) {
+    body {
+        background-color: #ffffff;
+        color: #000000;
+    }
+    
+    /* Adjust colors to ensure sufficient contrast */
+    .message.user .message-content {
+        background-color: #005DE8;
+        color: #ffffff;
+    }
+
+    .message.ai .message-content {
+        background-color: #f0f0f0;
+        color: #000000;
+    }
 }

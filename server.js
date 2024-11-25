@@ -135,7 +135,7 @@ if (isDevelopment) {
       req.user = req.session.user;
     } else {
       req.user = {
-        email: 'test@example.com',
+        email: 'JSerpis@delta.kaplaninc.com',
         name: 'Test User',
         userRoles: ['authenticated'],
       };
@@ -161,7 +161,7 @@ function ensureAuthenticated(req, res, next) {
       if (process.env.NODE_ENV === 'development') {
         // In development, simulate authentication
         req.user = {
-          email: 'test@example.com',
+          email: 'JSerpis@delta.kaplaninc.com',
           name: 'Test User',
           userRoles: ['authenticated'],
         };
