@@ -123,10 +123,10 @@ async function loadChatHistory() {
         const res = await fetch('/chats', {
             credentials: 'include',
             headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
             },
-          });
+        });
 
         if (res.status === 401) {
             window.location.href = '/login';
@@ -136,8 +136,8 @@ async function loadChatHistory() {
         if (!res.ok) {
             throw new Error(`HTTP error! status: ${res.status}`);
         }
-  
-      const chats = await res.json();
+
+        const chats = await res.json();
 
         chatHistoryList.innerHTML = ''; // Clear the existing list
 
@@ -158,64 +158,72 @@ async function loadChatHistory() {
 
             const reversedChats = chats[category].slice().reverse();
 
-        // Append each chat item
-        reversedChats.forEach(chat => {
-            const chatItem = document.createElement('li');
-            chatItem.dataset.chatId = chat.chatId;
-            chatItem.classList.add('chat-item');
-            chatItem.setAttribute('tabindex', '0'); // Make focusable
-            chatItem.setAttribute('role', 'button'); // Semantics for screen readers
-            chatItem.setAttribute('aria-label', `Chat titled ${chat.title}`); // Descriptive label
-        
-            // Create a span for the chat title
-            const chatTitle = document.createElement('span');
-            chatTitle.textContent = chat.title;
-            chatTitle.classList.add('chat-title');
-        
-            // Event listener for click
-            chatItem.addEventListener('click', () => loadChat(chat.chatId));
-        
-            // Keyboard event listener for Enter and Space keys
-            chatItem.addEventListener('keydown', function(event) {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    loadChat(chat.chatId);
-                }
-            });
-        
-            // Create the bin icon
-            const binIcon = document.createElement('i');
-            binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
-            binIcon.setAttribute('tabindex', '0'); // Make focusable
-            binIcon.setAttribute('role', 'button');
-            binIcon.setAttribute('aria-label', `Delete chat titled ${chat.title}`);
-        
-            // Add click event to bin icon
-            binIcon.addEventListener('click', (e) => {
-                e.stopPropagation(); // Prevent the click from triggering loadChat
-                deleteChat(chat.chatId);
-            });
-        
-            // Keyboard event listener for bin icon
-            binIcon.addEventListener('keydown', function(event) {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    event.stopPropagation();
+            // Append each chat item
+            reversedChats.forEach(chat => {
+                const chatItem = document.createElement('li');
+                chatItem.dataset.chatId = chat.chatId;
+                chatItem.classList.add('chat-item');
+                chatItem.setAttribute('role', 'group');
+                chatItem.setAttribute('aria-label', `Chat item for ${chat.title}`);
+
+                // Event listener for click on chatItem
+                chatItem.addEventListener('click', () => loadChat(chat.chatId));
+
+                // Add focus and blur event listeners for active state
+                chatItem.addEventListener('focus', function() {
+                    chatItem.classList.add('active');
+                });
+                chatItem.addEventListener('blur', function() {
+                    chatItem.classList.remove('active');
+                });
+
+                // Create a span for the chat title
+                const chatTitle = document.createElement('span');
+                chatTitle.textContent = chat.title;
+                chatTitle.classList.add('chat-title');
+                chatTitle.setAttribute('tabindex', '0'); // Make focusable
+                chatTitle.setAttribute('role', 'button'); // Semantics for screen readers
+                chatTitle.setAttribute('aria-label', `Chat titled ${chat.title}`); // Descriptive label
+
+                // Event listener for click on chatTitle
+                chatTitle.addEventListener('click', () => loadChat(chat.chatId));
+
+                // Keyboard event listener for Enter and Space keys on chatTitle
+                chatTitle.addEventListener('keydown', async function(event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        await loadChat(chat.chatId);
+                        // No need to call chatInput.focus() here if it's called inside loadChat
+                    }
+                });
+
+                // Create the bin icon button
+                const binIconButton = document.createElement('button');
+                binIconButton.classList.add('bin-icon-button');
+                binIconButton.setAttribute('aria-label', `Delete chat titled ${chat.title}`);
+
+                const binIcon = document.createElement('i');
+                binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
+
+                binIconButton.appendChild(binIcon);
+
+                // Add click event to binIconButton
+                binIconButton.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent the click from triggering loadChat
                     deleteChat(chat.chatId);
+                });
+
+                // Append title and bin icon button to chatItem
+                chatItem.appendChild(chatTitle);
+                chatItem.appendChild(binIconButton);
+
+                // Check the visibility property and set display accordingly
+                if (chat.visibility !== 1 && chat.visibility !== undefined) {
+                    chatItem.style.display = 'none';
                 }
+
+                chatItems.appendChild(chatItem);
             });
-        
-            // Append title and bin icon to chatItem
-            chatItem.appendChild(chatTitle);
-            chatItem.appendChild(binIcon);
-        
-            // Check the visibility property and set display accordingly
-            if (chat.visibility !== 1 && chat.visibility !== undefined) {
-                chatItem.style.display = 'none';
-            }
-        
-            chatItems.appendChild(chatItem);
-        });
 
             chatHistoryList.appendChild(chatItems);
         });
@@ -232,23 +240,24 @@ async function loadChat(chatIdToLoad) {
     const res = await fetch(`/chats/${chatId}`);
     const chat = await res.json();
 
-    chatBox.innerHTML = ''; // Clear the chat window
+    chatBox.innerHTML = '';
 
     // If the chat has no messages, show the welcome screen
     if (chat.messages.length === 0) {
         showWelcomeScreen();
     } else {
-        hideWelcomeScreen(); // Hide the welcome screen if there are messages
+        hideWelcomeScreen();
     }
 
     // Append the messages to the chat window
     chat.messages.forEach(msg => {
         appendMessage(msg.role === 'user' ? 'You' : 'AI', msg.content, false);
     });
+
+    chatInput.focus();
 }
 
 newChatBtn.addEventListener('click', () => {
-    // Clear chat window and show the welcome screen
     chatBox.innerHTML = '';
     showWelcomeScreen();
 
@@ -256,7 +265,7 @@ newChatBtn.addEventListener('click', () => {
     chatId = generateChatId();
     sessionStorage.setItem('chatId', chatId);
 
-    loadChatHistory(); // Reload chat history in the side panel
+    loadChatHistory();
     isFirstInteraction = true;
 });
 
@@ -278,7 +287,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
-        let entireMessage = ''; // To store the entire message
+        let entireMessage = '';
 
         // Use a regex to split the content into normal text, code blocks, and MathJax
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
@@ -407,7 +416,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
     messageElement.appendChild(messageContent);
     chatBox.appendChild(messageElement);
-    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
+    chatBox.scrollTop = chatBox.scrollHeight;
 
     // Render MathJax dynamically
     if (window.MathJax && MathJax.typeset) {
@@ -579,6 +588,17 @@ function initializeActiveState() {
     const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
 
+    iconContainer.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            // Move focus to the first chatItem
+            const firstChatItem = document.querySelector('.chat-item');
+            if (firstChatItem) {
+                firstChatItem.focus();
+            }
+        }
+    });
+
     if (!sidebar.classList.contains('collapsed')) {
         // Sidebar is open, add 'active' class to icons and icon-container
         collapseBtn.classList.add('active');
@@ -683,6 +703,17 @@ sendBtn.addEventListener('click', async () => {
 
         } catch (error) {
             console.error('Error sending message:', error);
+        }
+    }
+});
+
+sendBtn.addEventListener('keydown', function(event) {
+    if (event.key === 'Tab' && !event.shiftKey) {
+        event.preventDefault();
+        // Move focus to the first chatItem
+        const firstChatItem = document.querySelector('.chat-item');
+        if (firstChatItem) {
+            firstChatItem.focus();
         }
     }
 });
@@ -1048,10 +1079,10 @@ function appendFormula(formula) {
     const formulaContainer = document.createElement('div');
     formulaContainer.className = 'display-formula';
     formulaContainer.innerHTML = `$$${formula}$$`;
-  
+
     chatBox.appendChild(formulaContainer);
     MathJax.typesetPromise(); // Re-render MathJax equations
-  }
+}
 
 async function updateChatsVisibility() {
     const querySpec = {

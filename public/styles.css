@@ -75,26 +75,34 @@
     color: #909095 !important;
 }
 
-.chat-item .bin-icon {
+.chat-item .bin-icon-button {
     display: none;
 }
 
-/* Display the bin icon only on hover */
-.chat-item:hover .bin-icon {
+/* Display the bin icon when hovering over the chat item */
+.chat-item:hover .bin-icon-button {
     display: inline-block;
     color: #888;
     cursor: pointer;
+    border: none;
     margin-left: 8px;
     margin-top: 3px;
 }
 
-.chat-item:focus .bin-icon {
-    outline: 2px solid #005DE8;
+/* Display the bin icon when the chat item or any of its descendants have focus */
+.chat-item:focus-within .bin-icon-button {
     display: inline-block;
     color: #888;
     cursor: pointer;
+    border: none;
     margin-left: 8px;
     margin-top: 3px;
+}
+
+/* Ensure the bin icon is focusable and styled when focused */
+.bin-icon-button:focus {
+    outline: 2px solid #005DE8;
+    border: none;
 }
 
 #send-btn {
