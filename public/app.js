@@ -2,6 +2,16 @@
 let chatId = generateChatId();
 sessionStorage.setItem('chatId', chatId);
 
+document.addEventListener("DOMContentLoaded", () => {
+    if (window.MathJax) {
+        MathJax.startup.promise.then(() => {
+            console.log("MathJax is loaded and ready.");
+        });
+    } else {
+        console.error("MathJax failed to load.");
+    }
+});
+
 // Initialize variables
 let isFirstInteraction = true;
 
@@ -113,10 +123,10 @@ async function loadChatHistory() {
         const res = await fetch('/chats', {
             credentials: 'include',
             headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
             },
-          });
+        });
 
         if (res.status === 401) {
             window.location.href = '/login';
@@ -126,8 +136,8 @@ async function loadChatHistory() {
         if (!res.ok) {
             throw new Error(`HTTP error! status: ${res.status}`);
         }
-  
-      const chats = await res.json();
+
+        const chats = await res.json();
 
         chatHistoryList.innerHTML = ''; // Clear the existing list
 
@@ -148,39 +158,72 @@ async function loadChatHistory() {
 
             const reversedChats = chats[category].slice().reverse();
 
-        // Append each chat item
-        reversedChats.forEach(chat => {
-            const chatItem = document.createElement('li');
-            chatItem.dataset.chatId = chat.chatId;
-            chatItem.classList.add('chat-item');
+            // Append each chat item
+            reversedChats.forEach(chat => {
+                const chatItem = document.createElement('li');
+                chatItem.dataset.chatId = chat.chatId;
+                chatItem.classList.add('chat-item');
+                chatItem.setAttribute('role', 'group');
+                chatItem.setAttribute('aria-label', `Chat item for ${chat.title}`);
 
-            // Create a span for the chat title
-            const chatTitle = document.createElement('span');
-            chatTitle.textContent = chat.title;
-            chatTitle.classList.add('chat-title');
-            chatTitle.addEventListener('click', () => loadChat(chat.chatId));
+                // Event listener for click on chatItem
+                chatItem.addEventListener('click', () => loadChat(chat.chatId));
 
-            // Create the bin icon
-            const binIcon = document.createElement('i');
-            binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
+                // Add focus and blur event listeners for active state
+                chatItem.addEventListener('focus', function() {
+                    chatItem.classList.add('active');
+                });
+                chatItem.addEventListener('blur', function() {
+                    chatItem.classList.remove('active');
+                });
 
-            // Add click event to bin icon
-            binIcon.addEventListener('click', (e) => {
-                e.stopPropagation(); // Prevent the click from triggering the loadChat
-                deleteChat(chat.chatId);
+                // Create a span for the chat title
+                const chatTitle = document.createElement('span');
+                chatTitle.textContent = chat.title;
+                chatTitle.classList.add('chat-title');
+                chatTitle.setAttribute('tabindex', '0'); // Make focusable
+                chatTitle.setAttribute('role', 'button'); // Semantics for screen readers
+                chatTitle.setAttribute('aria-label', `Chat titled ${chat.title}`); // Descriptive label
+
+                // Event listener for click on chatTitle
+                chatTitle.addEventListener('click', () => loadChat(chat.chatId));
+
+                // Keyboard event listener for Enter and Space keys on chatTitle
+                chatTitle.addEventListener('keydown', async function(event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        await loadChat(chat.chatId);
+                        // No need to call chatInput.focus() here if it's called inside loadChat
+                    }
+                });
+
+                // Create the bin icon button
+                const binIconButton = document.createElement('button');
+                binIconButton.classList.add('bin-icon-button');
+                binIconButton.setAttribute('aria-label', `Delete chat titled ${chat.title}`);
+
+                const binIcon = document.createElement('i');
+                binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
+
+                binIconButton.appendChild(binIcon);
+
+                // Add click event to binIconButton
+                binIconButton.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent the click from triggering loadChat
+                    deleteChat(chat.chatId);
+                });
+
+                // Append title and bin icon button to chatItem
+                chatItem.appendChild(chatTitle);
+                chatItem.appendChild(binIconButton);
+
+                // Check the visibility property and set display accordingly
+                if (chat.visibility !== 1 && chat.visibility !== undefined) {
+                    chatItem.style.display = 'none';
+                }
+
+                chatItems.appendChild(chatItem);
             });
-
-            // Append title and bin icon to chatItem
-            chatItem.appendChild(chatTitle);
-            chatItem.appendChild(binIcon);
-
-            // Check the visibility property and set display accordingly
-            if (chat.visibility !== 1 && chat.visibility !== undefined) {
-                chatItem.style.display = 'none';
-            }
-
-            chatItems.appendChild(chatItem);
-        });
 
             chatHistoryList.appendChild(chatItems);
         });
@@ -197,23 +240,24 @@ async function loadChat(chatIdToLoad) {
     const res = await fetch(`/chats/${chatId}`);
     const chat = await res.json();
 
-    chatBox.innerHTML = ''; // Clear the chat window
+    chatBox.innerHTML = '';
 
     // If the chat has no messages, show the welcome screen
     if (chat.messages.length === 0) {
         showWelcomeScreen();
     } else {
-        hideWelcomeScreen(); // Hide the welcome screen if there are messages
+        hideWelcomeScreen();
     }
 
     // Append the messages to the chat window
     chat.messages.forEach(msg => {
         appendMessage(msg.role === 'user' ? 'You' : 'AI', msg.content, false);
     });
+
+    chatInput.focus();
 }
 
 newChatBtn.addEventListener('click', () => {
-    // Clear chat window and show the welcome screen
     chatBox.innerHTML = '';
     showWelcomeScreen();
 
@@ -221,7 +265,7 @@ newChatBtn.addEventListener('click', () => {
     chatId = generateChatId();
     sessionStorage.setItem('chatId', chatId);
 
-    loadChatHistory(); // Reload chat history in the side panel
+    loadChatHistory();
     isFirstInteraction = true;
 });
 
@@ -243,35 +287,41 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
-        let entireMessage = ''; // To store the entire message
+        let entireMessage = '';
 
-        // Use a regex to split the content into normal text and code blocks
+        // Use a regex to split the content into normal text, code blocks, and MathJax
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
         parts.forEach((part, index) => {
             if (index % 3 === 0) {
-                // Regular text part
+                // Regular text or MathJax content
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
-                // Use the same text rendering method for normal text
-                const parsedText = marked.parse(part.trim());
-                messageText.innerHTML = parsedText;
+                // Detect and handle MathJax syntax
+                if (/\$\$[\s\S]*\$\$|\\\([\s\S]*\\\)/.test(part)) {
+                    // MathJax block
+                    messageText.innerHTML = part.trim();
+                } else {
+                    // Markdown-rendered regular text
+                    const parsedText = marked.parse(part.trim());
+                    messageText.innerHTML = parsedText;
 
-                // Add 'table' class to any tables
-                const tables = messageText.querySelectorAll('table');
-                tables.forEach(table => {
-                    table.classList.add('table');
-                });
+                    // Add 'table' class to any tables for consistent styling
+                    const tables = messageText.querySelectorAll('table');
+                    tables.forEach(table => {
+                        table.classList.add('table');
+                    });
+                }
 
                 messageBody.appendChild(messageText);
                 entireMessage += part.trim();
             } else if (index % 3 === 1) {
                 // Capture language identifier (e.g., python, javascript)
-                var language = part.trim(); // Extract language from the first part of the regex capture group.
+                var language = part.trim();
             } else if (index % 3 === 2) {
-                // Code block part
+                // Code block content
                 const codeBlock = document.createElement("div");
                 codeBlock.classList.add("code-block-container");
 
@@ -283,7 +333,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                     codeContent.classList.add(`language-${language}`);
                 }
 
-                codeContent.textContent = part.trim(); // Add code inside <pre><code></code></pre>
+                codeContent.textContent = part.trim();
                 codeElement.appendChild(codeContent);
 
                 // Initialize Highlight.js for the code block
@@ -294,7 +344,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeCopyButton.classList.add("material-symbols-rounded", "code-copy-button");
                 codeCopyButton.textContent = "content_copy";
 
-                // Bind the copy event right after appending the code
                 codeCopyButton.addEventListener("click", () => {
                     navigator.clipboard.writeText(part.trim()).then(() => {
                         codeCopyButton.textContent = "done";
@@ -367,7 +416,14 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
     messageElement.appendChild(messageContent);
     chatBox.appendChild(messageElement);
-    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Render MathJax dynamically
+    if (window.MathJax && MathJax.typeset) {
+        MathJax.typeset();
+    } else {
+        console.error("MathJax is not loaded or does not support typeset.");
+    }
 
     return messageElement; // Return the element for further manipulation
 }
@@ -532,6 +588,17 @@ function initializeActiveState() {
     const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
 
+    iconContainer.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            // Move focus to the first chatItem
+            const firstChatItem = document.querySelector('.chat-item');
+            if (firstChatItem) {
+                firstChatItem.focus();
+            }
+        }
+    });
+
     if (!sidebar.classList.contains('collapsed')) {
         // Sidebar is open, add 'active' class to icons and icon-container
         collapseBtn.classList.add('active');
@@ -553,6 +620,43 @@ function initializeActiveState() {
 document.addEventListener('DOMContentLoaded', () => {
     initializeActiveState();
     loadChatHistory(); // Load chat history on page load
+
+       // Add keyboard accessibility for the collapse button
+       const collapseBtn = document.getElementById('collapse-btn');
+       collapseBtn.addEventListener('keydown', function(event) {
+           if (event.key === 'Enter' || event.key === ' ') {
+               event.preventDefault();
+               toggleSidebar();
+           }
+       });
+   
+       // Add keyboard accessibility for the tutor mode button
+       tutorModeButton.addEventListener('keydown', function(event) {
+           if (event.key === 'Enter' || event.key === ' ') {
+               event.preventDefault();
+               tutorModeDropdown.style.display = tutorModeDropdown.style.display === 'block' ? 'none' : 'block';
+               tutorModeButton.setAttribute('aria-expanded', tutorModeDropdown.style.display === 'block');
+           }
+       });
+   
+       // Close the dropdown when focus is lost
+       tutorModeDropdown.addEventListener('focusout', function(event) {
+           if (!tutorModeDropdown.contains(event.relatedTarget)) {
+               tutorModeDropdown.style.display = 'none';
+               tutorModeButton.setAttribute('aria-expanded', 'false');
+           }
+       });
+   
+       // Ensure dropdown items are focusable and can be activated via keyboard
+       dropdownItems.forEach(item => {
+           item.setAttribute('tabindex', '0');
+           item.addEventListener('keydown', function(event) {
+               if (event.key === 'Enter' || event.key === ' ') {
+                   event.preventDefault();
+                   this.click();
+               }
+           });
+       });
 });
 
 sendBtn.addEventListener('click', async () => {
@@ -587,9 +691,13 @@ sendBtn.addEventListener('click', async () => {
                 response = await sendMessage(message);
             }
 
-            const messageContent = loadingMessageElement.querySelector('.message-content');
+            if (response) {
+                streamParsedResponse(messageContent, response);
+            } else {
+                console.error('Response is undefined.');
+            }
 
-            // **Removed the code that was removing loading dots here**
+            const messageContent = loadingMessageElement.querySelector('.message-content');
 
             // Stream the raw AI response text
             streamParsedResponse(messageContent, response);
@@ -599,6 +707,17 @@ sendBtn.addEventListener('click', async () => {
 
         } catch (error) {
             console.error('Error sending message:', error);
+        }
+    }
+});
+
+sendBtn.addEventListener('keydown', function(event) {
+    if (event.key === 'Tab' && !event.shiftKey) {
+        event.preventDefault();
+        // Move focus to the first chatItem
+        const firstChatItem = document.querySelector('.chat-item');
+        if (firstChatItem) {
+            firstChatItem.focus();
         }
     }
 });
@@ -649,13 +768,16 @@ function streamParsedResponse(messageContent, rawResponseText) {
 
             // Update the messageText content
             messageText.innerHTML = marked.parse(accumulatedText);
-
             chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
         } else {
             clearInterval(wordInterval);
 
-            // After streaming is complete, re-render the message to handle code blocks
-            reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
+            // After streaming is complete, render MathJax content
+            if (window.MathJax && MathJax.typeset) {
+                MathJax.typeset();
+            } else {
+                console.error("MathJax is not loaded or does not support typeset.");
+            }
         }
     }, 20); // Adjust the interval as needed for speed
 }
@@ -666,30 +788,36 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
 
     let entireMessage = ''; // To store the entire message
 
-    // Use regex to split the content into normal text and code blocks
+    // Use regex to split the content into normal text, code blocks, and MathJax
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
     const parts = rawResponseText.split(codeBlockRegex);
 
     parts.forEach((part, index) => {
         if (index % 3 === 0) {
-            // Regular text part
+            // Regular text or MathJax content
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
 
-            // Parse the text with Markdown
-            const parsedText = marked.parse(part.trim());
-            messageText.innerHTML = parsedText;
+            // Detect MathJax syntax
+            if (/\$\$[\s\S]*\$\$|\\\([\s\S]*\\\)/.test(part.trim())) {
+                // MathJax block
+                messageText.innerHTML = part.trim();
+            } else {
+                // Markdown-rendered regular text
+                const parsedText = marked.parse(part.trim());
+                messageText.innerHTML = parsedText;
 
-            // Add 'table' class to any tables
-            const tables = messageText.querySelectorAll('table');
-            tables.forEach(table => {
-                table.classList.add('table');
-            });
+                // Add 'table' class to any tables for consistent styling
+                const tables = messageText.querySelectorAll('table');
+                tables.forEach(table => {
+                    table.classList.add('table');
+                });
+            }
 
             messageBody.appendChild(messageText);
             entireMessage += part.trim();
         } else if (index % 3 === 1) {
-            // Capture language identifier
+            // Capture language identifier (e.g., python, javascript)
             var language = part.trim();
         } else if (index % 3 === 2) {
             // Code block part
@@ -732,25 +860,32 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     });
 
     // Add copy button for the entire AI message
-    const copyButtonContainer = document.createElement("div");
-    copyButtonContainer.classList.add("copy-button-container");
+    const copyButtonContainer = document.createElement('div');
+    copyButtonContainer.classList.add('copy-button-container');
 
-    const copyButton = document.createElement("span");
-    copyButton.classList.add("material-symbols-rounded", "copy-button");
-    copyButton.textContent = "content_copy";
+    const copyButton = document.createElement('span');
+    copyButton.classList.add('material-symbols-rounded', 'copy-button');
+    copyButton.textContent = 'content_copy';
     copyButtonContainer.appendChild(copyButton);
 
     messageBody.appendChild(copyButtonContainer);
 
     // Copy the entire message
-    copyButton.addEventListener("click", () => {
+    copyButton.addEventListener('click', () => {
         navigator.clipboard.writeText(entireMessage).then(() => {
-            copyButton.textContent = "done";
+            copyButton.textContent = 'done';
             setTimeout(() => {
-                copyButton.textContent = "content_copy";
+                copyButton.textContent = 'content_copy';
             }, 2000);
         });
     });
+
+    // Render MathJax content dynamically
+    if (window.MathJax && MathJax.typeset) {
+        MathJax.typeset();
+    } else {
+        console.error('MathJax is not loaded or does not support typeset.');
+    }
 }
 
 // Function to reset the input height after sending a message
@@ -907,13 +1042,16 @@ async function sendMessageWithImage(message, imageFile) {
     }
 
     try {
-        const res = await fetch('/chats', {
+        const res = await fetch('/chat', {
+            method: 'POST', // Include the HTTP method
+            body: formData, // Include the form data in the body
             credentials: 'include',
             headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                // Note: Do not set 'Content-Type' header when sending FormData
             },
-          });
+        });
 
         if (res.status === 401) {
             window.location.href = '/login';
@@ -936,7 +1074,22 @@ async function sendMessageWithImage(message, imageFile) {
         return data.response;
     } catch (error) {
         console.error('Error sending message with image:', error);
+        throw error; // Optionally re-throw the error to be caught by the caller
     }
+}
+
+function renderMath() {
+    MathJax.typeset();
+}
+
+function appendFormula(formula) {
+    const chatBox = document.getElementById('chat-box');
+    const formulaContainer = document.createElement('div');
+    formulaContainer.className = 'display-formula';
+    formulaContainer.innerHTML = `$$${formula}$$`;
+
+    chatBox.appendChild(formulaContainer);
+    MathJax.typesetPromise(); // Re-render MathJax equations
 }
 
 async function updateChatsVisibility() {

@@ -135,7 +135,7 @@ if (isDevelopment) {
       req.user = req.session.user;
     } else {
       req.user = {
-        email: 'test@example.com',
+        email: 'JSerpis@delta.kaplaninc.com',
         name: 'Test User',
         userRoles: ['authenticated'],
       };
@@ -161,7 +161,7 @@ function ensureAuthenticated(req, res, next) {
       if (process.env.NODE_ENV === 'development') {
         // In development, simulate authentication
         req.user = {
-          email: 'test@example.com',
+          email: 'JSerpis@delta.kaplaninc.com',
           name: 'Test User',
           userRoles: ['authenticated'],
         };
@@ -592,7 +592,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
             // Generate chat title using OpenAI
             const titlePrompt = [
                 { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation.' },
-                { role: 'user', content: message }
+                { role: 'user', content: message || 'New Conversation' } // Use default if message is undefined
             ];
 
             // Prepare payload for OpenAI
@@ -737,26 +737,32 @@ app.delete('/chats/:chatId', async (req, res) => {
 async function deleteOldChats() {
     try {
         const querySpec = {
-            query: 'SELECT c.id, c.timestamp FROM c',
+            query: 'SELECT * FROM c'
         };
 
         const { resources: chats } = await container.items.query(querySpec).fetchAll();
 
         const now = new Date();
-        const ninetyDaysInMillis = 90 * 24 * 60 * 60 * 1000;  // 90 days in milliseconds
+        const ninetyDaysInMillis = 90 * 24 * 60 * 60 * 1000; // 90 days in milliseconds
 
         for (const chat of chats) {
             const chatTimestamp = new Date(chat.timestamp);
             const ageInMillis = now - chatTimestamp;
 
             if (ageInMillis > ninetyDaysInMillis) {
-                // Chat is older than 90 days, delete it
-                await container.item(chat.id, chat.id).delete();
-                console.log(`Deleted chat with ID: ${chat.id} because it is older than 90 days.`);
+                // Chat is older than 90 days, delete specified fields
+                delete chat.messages;
+                delete chat.timestamp;
+                delete chat.total_document_count;
+                delete chat.total_image_count;
+
+                // Upsert the updated chat document back into the database
+                await container.items.upsert(chat, { partitionKey: chat.id });
+                console.log(`Updated chat with ID: ${chat.id} by deleting specified fields.`);
             }
         }
     } catch (error) {
-        console.error('Error deleting old chats:', error);
+        console.error('Error deleting fields from old chats:', error);
     }
 }
 
