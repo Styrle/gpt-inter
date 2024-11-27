@@ -592,7 +592,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
             // Generate chat title using OpenAI
             const titlePrompt = [
                 { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation.' },
-                { role: 'user', content: message }
+                { role: 'user', content: message || 'New Conversation' } // Use default if message is undefined
             ];
 
             // Prepare payload for OpenAI

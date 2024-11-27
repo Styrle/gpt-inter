@@ -691,9 +691,13 @@ sendBtn.addEventListener('click', async () => {
                 response = await sendMessage(message);
             }
 
-            const messageContent = loadingMessageElement.querySelector('.message-content');
+            if (response) {
+                streamParsedResponse(messageContent, response);
+            } else {
+                console.error('Response is undefined.');
+            }
 
-            // **Removed the code that was removing loading dots here**
+            const messageContent = loadingMessageElement.querySelector('.message-content');
 
             // Stream the raw AI response text
             streamParsedResponse(messageContent, response);
@@ -1038,13 +1042,16 @@ async function sendMessageWithImage(message, imageFile) {
     }
 
     try {
-        const res = await fetch('/chats', {
+        const res = await fetch('/chat', {
+            method: 'POST', // Include the HTTP method
+            body: formData, // Include the form data in the body
             credentials: 'include',
             headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                // Note: Do not set 'Content-Type' header when sending FormData
             },
-          });
+        });
 
         if (res.status === 401) {
             window.location.href = '/login';
@@ -1067,6 +1074,7 @@ async function sendMessageWithImage(message, imageFile) {
         return data.response;
     } catch (error) {
         console.error('Error sending message with image:', error);
+        throw error; // Optionally re-throw the error to be caught by the caller
     }
 }
 
