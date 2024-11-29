@@ -29,6 +29,14 @@ const tutorModeButton = document.getElementById('tutor-mode-button');
 const tutorModeDropdown = document.getElementById('tutor-mode-dropdown');
 const dropdownItems = document.querySelectorAll('#tutor-mode-dropdown .dropdown-item');
 
+const inputContainer = document.querySelector('.input-container');
+
+// Add drag-and-drop event listeners
+inputContainer.addEventListener('dragenter', handleDragEnter, false);
+inputContainer.addEventListener('dragover', handleDragOver, false);
+inputContainer.addEventListener('dragleave', handleDragLeave, false);
+inputContainer.addEventListener('drop', handleDrop, false);
+
 // Function to update the checkmark based on the selected mode
 function updateCheckmark() {
     dropdownItems.forEach(item => {
@@ -443,69 +451,70 @@ fileUpload.addEventListener('change', async function () {
     if (fileUploadInProgress) return;  // Prevent multiple uploads
     fileUploadInProgress = true;
 
-    const file = fileUpload.files[0];
-    if (file) {
-        if (file.type.startsWith('image/')) {
-            // It's an image, store it for sending with the next message
-            selectedImageFile = file;
+    const files = fileUpload.files;
+    if (files.length > 0) {
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                // It's an image, store it for sending with the next message
+                selectedImageFile = file;
 
-            // Optionally, display the selected file in the chat
-            appendFileLink(file.name);
+                // Optionally, display the selected file in the chat
+                appendFileLink(file.name);
 
-            // Change the attach icon to 'done'
-            attachIcon.textContent = "done"; 
+                // Change the attach icon to 'done'
+                attachIcon.textContent = "done"; 
 
-            // Revert back to attach icon after 2 seconds
-            setTimeout(() => {
-                attachIcon.textContent = "attach_file";
-            }, 2000);
-
-            // Reset the file input
-            fileUpload.value = '';
-            fileUploadInProgress = false;  // Clear the upload flag
-        } else {
-            // Not an image, upload it immediately via /upload endpoint
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('chatId', chatId); // Ensure chatId is sent along with the file
-
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                if (response.ok) {
-                    // Change the attach icon to 'done'
-                    attachIcon.textContent = "done"; 
-                    
-                    // Revert back to attach icon after 2 seconds
-                    setTimeout(() => {
-                        attachIcon.textContent = "attach_file";
-                    }, 2000);
-
-                    // Since the server does not return a file URL, we can inform the user that the file was uploaded
-                    appendMessage('System', `File "${file.name}" uploaded successfully.`);
-
-                    // Optionally, you can also display the file name in the chat
-                    appendFileLink(file.name);
-                } else {
-                    const errorData = await response.json();
-                    console.error('Upload error:', errorData.error);
-                    appendMessage('System', `Error uploading file: ${errorData.error}`);
-                }
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                appendMessage('System', 'An error occurred while uploading the file.');
-            } finally {
-                // Ensure that fileUpload is reset and the upload flag is cleared after processing
+                // Revert back to attach icon after 2 seconds
                 setTimeout(() => {
-                    fileUpload.value = '';  // Reset the file input, but with a delay to ensure upload completes
-                }, 100);  // Small delay to ensure the input reset doesn't cause interference
-                fileUploadInProgress = false;  // Clear the upload flag
+                    attachIcon.textContent = "attach_file";
+                }, 2000);
+
+                // Reset the file input
+                fileUpload.value = '';
+            } else {
+                // Not an image, upload it immediately via /upload endpoint
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('chatId', chatId); // Ensure chatId is sent along with the file
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (response.ok) {
+                        // Change the attach icon to 'done'
+                        attachIcon.textContent = "done"; 
+                        
+                        // Revert back to attach icon after 2 seconds
+                        setTimeout(() => {
+                            attachIcon.textContent = "attach_file";
+                        }, 2000);
+
+                        // Inform the user that the file was uploaded
+                        appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                        // Optionally, display the file name in the chat
+                        appendFileLink(file.name);
+                    } else {
+                        const errorData = await response.json();
+                        console.error('Upload error:', errorData.error);
+                        appendMessage('System', `Error uploading file: ${errorData.error}`);
+                    }
+                } catch (error) {
+                    console.error('Error uploading file:', error);
+                    appendMessage('System', 'An error occurred while uploading the file.');
+                } finally {
+                    // Ensure that fileUpload is reset after processing
+                    setTimeout(() => {
+                        fileUpload.value = '';  // Reset the file input, but with a delay to ensure upload completes
+                    }, 100);  // Small delay to ensure the input reset doesn't cause interference
+                }
             }
         }
     }
+    fileUploadInProgress = false;  // Clear the upload flag
 });
 
 function appendFileLink(fileName, fileUrl) {
@@ -745,9 +754,15 @@ function streamParsedResponse(messageContent, rawResponseText) {
     const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
     let currentWordIndex = 0;
     let accumulatedText = ''; // To accumulate the words as they stream in
+    let lastRenderedWordIndex = 0; // Track the last index rendered for heavy tasks
 
-    // Get the messageBody and ensure there's a messageText element
+    // Ensure messageBody exists
     const messageBody = messageContent.querySelector('.message-body');
+    if (!messageBody) {
+        console.error("Message body not found.");
+        return;
+    }
+
     let messageText = messageBody.querySelector('.message-text');
     if (!messageText) {
         messageText = document.createElement('div');
@@ -755,7 +770,7 @@ function streamParsedResponse(messageContent, rawResponseText) {
         messageBody.appendChild(messageText);
     }
 
-    // **Remove loading dots as soon as content starts streaming**
+    // Remove loading dots once streaming starts
     const loadingDots = messageBody.querySelector('.loading-dots');
     if (loadingDots) {
         loadingDots.remove();
@@ -766,20 +781,33 @@ function streamParsedResponse(messageContent, rawResponseText) {
             accumulatedText += words[currentWordIndex];
             currentWordIndex++;
 
-            // Update the messageText content
+            // Update text frequently for real-time effect
             messageText.innerHTML = marked.parse(accumulatedText);
-            chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
+
+            // Perform heavy operations less frequently
+            if (currentWordIndex - lastRenderedWordIndex >= 20 || currentWordIndex === words.length) {
+                lastRenderedWordIndex = currentWordIndex;
+
+                // Re-render code blocks and MathJax less often
+                reRenderMessageWithCodeBlocks(messageBody, accumulatedText);
+
+                if (window.MathJax && MathJax.typesetPromise) {
+                    MathJax.typesetPromise().catch((err) => console.error("MathJax rendering failed:", err));
+                }
+            }
+
+            chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
         } else {
             clearInterval(wordInterval);
 
-            // After streaming is complete, render MathJax content
-            if (window.MathJax && MathJax.typeset) {
-                MathJax.typeset();
-            } else {
-                console.error("MathJax is not loaded or does not support typeset.");
+            // Final rendering after streaming completes
+            reRenderMessageWithCodeBlocks(messageBody, accumulatedText);
+
+            if (window.MathJax && MathJax.typesetPromise) {
+                MathJax.typesetPromise().catch((err) => console.error("MathJax rendering failed:", err));
             }
         }
-    }, 20); // Adjust the interval as needed for speed
+    }, 20); // Maintain the original speed
 }
 
 function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
@@ -1090,6 +1118,90 @@ function appendFormula(formula) {
 
     chatBox.appendChild(formulaContainer);
     MathJax.typesetPromise(); // Re-render MathJax equations
+}
+
+function handleDragEnter(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    inputContainer.classList.add('dragover');
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    inputContainer.classList.remove('dragover');
+}
+
+async function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    inputContainer.classList.remove('dragover');
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        if (fileUploadInProgress) return;  // Prevent multiple uploads
+        fileUploadInProgress = true;
+
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                // It's an image, store it for sending with the next message
+                selectedImageFile = file;
+
+                // Optionally, display the selected file in the chat
+                appendFileLink(file.name);
+
+                // Change the attach icon to 'done'
+                attachIcon.textContent = "done"; 
+
+                // Revert back to attach icon after 2 seconds
+                setTimeout(() => {
+                    attachIcon.textContent = "attach_file";
+                }, 2000);
+            } else {
+                // Not an image, upload it immediately via /upload endpoint
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('chatId', chatId); // Ensure chatId is sent along with the file
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (response.ok) {
+                        // Change the attach icon to 'done'
+                        attachIcon.textContent = "done"; 
+                        
+                        // Revert back to attach icon after 2 seconds
+                        setTimeout(() => {
+                            attachIcon.textContent = "attach_file";
+                        }, 2000);
+
+                        // Inform the user that the file was uploaded
+                        appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                        // Optionally, display the file name in the chat
+                        appendFileLink(file.name);
+                    } else {
+                        const errorData = await response.json();
+                        console.error('Upload error:', errorData.error);
+                        appendMessage('System', `Error uploading file: ${errorData.error}`);
+                    }
+                } catch (error) {
+                    console.error('Error uploading file:', error);
+                    appendMessage('System', 'An error occurred while uploading the file.');
+                }
+            }
+        }
+        fileUploadInProgress = false;  // Clear the upload flag
+    }
 }
 
 async function updateChatsVisibility() {

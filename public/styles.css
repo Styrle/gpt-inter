@@ -352,6 +352,7 @@ ul.chat-category-list {
     border-collapse: collapse;
     font-family: Arial, sans-serif;
     border-color: #909090;
+    margin: 15px 0px;
   }
 
   .table thead {
@@ -719,4 +720,10 @@ textarea:focus {
         background-color: #f0f0f0;
         color: #000000;
     }
+}
+
+.input-container.dragover,
+.input-container.dragover * {
+    border: 2px dashed #999;
+    background-color: #f9f9f9;
 }

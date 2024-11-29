@@ -43,12 +43,12 @@
       <!-- Changed span to button and added aria-haspopup and aria-expanded -->
       <button class="material-symbols-rounded tutor-mode-icon" id="tutor-mode-button" aria-label="Tutor Mode" aria-haspopup="true" aria-expanded="false">group</button>
       
-      <!-- Added role and aria-labelledby to dropdown -->
+      <!-- Added role and aria-labelledby to dropdown 
       <div class="dropdown" id="tutor-mode-dropdown" role="menu" aria-labelledby="tutor-mode-button">
-        <!-- Added role="menuitem" to dropdown items -->
         <button class="dropdown-item" data-mode="normal" role="menuitem">Normal <i class="fas fa-circle-check checkmark"></i></button>
         <button class="dropdown-item" data-mode="tutor" role="menuitem">Tutor <i class="fas fa-circle-check checkmark"></i></button>
       </div>
+      -->
     </div>
     
     <div class="sidebar" id="sidebar">
@@ -67,7 +67,7 @@
       <div class="input-container" tabindex="-1">
         <!-- Attach button with proper role and label -->
         <button id="attach-icon" class="material-symbols-rounded attach-icon" onclick="document.getElementById('file-upload').click()" aria-label="Attach File">attach_file</button>
-        <input type="file" id="file-upload" style="display: none;" />
+        <input type="file" id="file-upload" style="display: none;" multiple />
         <!-- Added aria-label and keyboard accessibility -->
         <textarea id="chat-input" placeholder="Type your message here..." oninput="autoGrowInput()" aria-label="Chat Input"></textarea>
         <!-- Changed span to button and added aria-label -->
