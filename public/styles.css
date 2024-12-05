@@ -39,6 +39,7 @@
     overflow-y: auto;
     overflow-x: hidden;
     margin-bottom: 10px;
+    padding-right: 10px;
 }
 
 #chat-box::-webkit-scrollbar {
