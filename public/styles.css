@@ -14,6 +14,7 @@
 .chat-window {
     flex: 1;
     display: flex;
+    position: relative;
     flex-direction: column;
     padding: 20px;
     overflow: hidden;
@@ -36,11 +37,22 @@
 #chat-box {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     margin-bottom: 10px;
-    padding: 10px;
 }
 
+#chat-box::-webkit-scrollbar {
+    width: 8px;
+}
 
+#chat-box::-webkit-scrollbar-track {
+    background: #f0f0f0;
+}
+
+#chat-box::-webkit-scrollbar-thumb {
+    background-color: #c0c0c0;
+    border-radius: 4px;
+}
 
 #chat-input {
     width: 100%;
@@ -726,4 +738,43 @@ textarea:focus {
 .input-container.dragover * {
     border: 2px dashed #999;
     background-color: #f9f9f9;
+}
+
+.popup-container {
+    position: absolute;
+    bottom: 100px; /* Adjust this value to position the popup above the input container */
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #bb3b3b;
+    color: #fff;
+    padding: 10px 15px;
+    border-radius: 5px;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    max-width: 80%;
+    word-wrap: break-word;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Popup Message */
+.popup-message {
+    font-size: 16px;
+    margin-right: 10px;
+    display: inline-block;
+}
+
+/* Popup Close Button */
+.popup-close-button {
+    cursor: pointer;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+    margin-left: 10px;
+    display: inline-block;
+}
+
+/* Fade-in Animation */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }

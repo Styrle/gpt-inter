@@ -53,18 +53,6 @@ function updateCheckmark() {
 // Initialize the dropdown with the correct state (Normal selected by default)
 updateCheckmark();
 
-// Toggle the dropdown visibility when the "group" icon is clicked
-tutorModeButton.addEventListener('click', function() {
-    tutorModeDropdown.style.display = tutorModeDropdown.style.display === 'block' ? 'none' : 'block';
-});
-
-// Close the dropdown if the user clicks outside of it
-window.addEventListener('click', function(event) {
-    if (!event.target.matches('#tutor-mode-button')) {
-        tutorModeDropdown.style.display = 'none';
-    }
-});
-
 // Add event listeners to the dropdown items to toggle Tutor Mode
 dropdownItems.forEach(item => {
     item.addEventListener('click', function() {
@@ -87,14 +75,54 @@ dropdownItems.forEach(item => {
     });
 });
 
+function displayPopup(message) {
+    // Create the popup container
+    const popupContainer = document.createElement('div');
+    popupContainer.classList.add('popup-container');
+
+    // Create the popup message element
+    const popupMessage = document.createElement('div');
+    popupMessage.classList.add('popup-message');
+    popupMessage.textContent = message;
+
+    // Create a close button
+    const closeButton = document.createElement('span');
+    closeButton.classList.add('popup-close-button');
+    closeButton.textContent = '×'; // Unicode multiplication sign
+
+    // Add click event to close the popup
+    closeButton.addEventListener('click', () => {
+        popupContainer.remove();
+    });
+
+    // Append message and close button to the container
+    popupContainer.appendChild(popupMessage);
+    popupContainer.appendChild(closeButton);
+
+    // Insert the popup container above the input-container
+    const chatWindow = document.querySelector('.chat-window');
+    const inputContainer = document.querySelector('.input-container');
+    chatWindow.insertBefore(popupContainer, inputContainer);
+
+    // Optional: Auto-remove the popup after a certain time (e.g., 5 seconds)
+    setTimeout(() => {
+        popupContainer.remove();
+    }, 5000);
+}
+
+function getFileExtension(fileName) {
+    const parts = fileName.split('.');
+    return parts.length > 1 ? parts.pop() : 'unknown';
+}
+
 // Send message function - ensure tutorMode is passed
-async function sendMessage(message) { 
+async function sendMessage(message) {
     try {
         const response = await fetch('/chat', {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest', // Add this header
+                'X-Requested-With': 'XMLHttpRequest',
             },
             body: JSON.stringify({ message, chatId, tutorMode: isTutorModeOn }),
             credentials: 'include',
@@ -103,6 +131,12 @@ async function sendMessage(message) {
         if (response.status === 401) {
             window.location.href = '/login';
             return;
+        }
+
+        if (response.status === 429) {
+            const { retryAfter } = await response.json();
+            displayRateLimitMessage(retryAfter);
+            return null;
         }
 
         if (!response.ok) {
@@ -115,6 +149,16 @@ async function sendMessage(message) {
         console.error('Error sending message:', error);
     }
 }
+
+function displayRateLimitMessage(retryAfter) {
+    const chatBox = document.getElementById('chat-box');
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('message', 'ai-message'); // Apply appropriate styling classes
+    messageElement.textContent = `KaplanGPT has hit its limit. Please wait ${retryAfter} seconds.`;
+    chatBox.appendChild(messageElement);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
 
 // Handle clicking the attach icon to trigger the file input
 attachIcon.addEventListener('click', () => {
@@ -499,9 +543,17 @@ fileUpload.addEventListener('change', async function () {
                         appendFileLink(file.name);
                     } else {
                         const errorData = await response.json();
-                        console.error('Upload error:', errorData.error);
-                        appendMessage('System', `Error uploading file: ${errorData.error}`);
-                    }
+                            console.error('Upload error:', errorData.error);
+                            appendMessage('System', `Error uploading file: ${errorData.error}`);
+
+                            // Display the popup if the error is about unsupported file type
+                            if (errorData.error.includes('Unsupported file type')) {
+                                const fileExtension = getFileExtension(file.name);
+                                displayPopup(`Document type .${fileExtension} not supported`);
+                            } else {
+                                displayPopup(`Error uploading file: ${errorData.error}`);
+                            }
+                        }
                 } catch (error) {
                     console.error('Error uploading file:', error);
                     appendMessage('System', 'An error occurred while uploading the file.');
@@ -557,19 +609,20 @@ const sidebar = document.getElementById('sidebar');
 
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
+    const chatBox = document.getElementById('chat-box');
     const collapseBtn = document.getElementById('collapse-btn');
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
     const chatWindow = document.querySelector('.chat-window');
     const tutorModeButton = document.getElementById('tutor-mode-button');
-    const iconContainer = document.querySelector('.icon-container'); // Get the icon-container
+    const iconContainer = document.querySelector('.icon-container');
 
     if (sidebar.classList.contains('collapsed')) {
         sidebar.classList.remove('collapsed');
+        chatBox.classList.remove('collapsed');
         collapseBtn.textContent = 'left_panel_close';
         chatWindow.classList.remove('collapsed');
 
-        // Add 'active' class to icons and icon-container when sidebar is open
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
@@ -577,10 +630,10 @@ function toggleSidebar() {
         iconContainer.classList.add('active');
     } else {
         sidebar.classList.add('collapsed');
+        chatBox.classList.add('collapsed'); // Add 'collapsed' to chat-box
         collapseBtn.textContent = 'left_panel_open';
         chatWindow.classList.add('collapsed');
 
-        // Remove 'active' class from icons and icon-container when sidebar is closed
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
@@ -636,23 +689,6 @@ document.addEventListener('DOMContentLoaded', () => {
            if (event.key === 'Enter' || event.key === ' ') {
                event.preventDefault();
                toggleSidebar();
-           }
-       });
-   
-       // Add keyboard accessibility for the tutor mode button
-       tutorModeButton.addEventListener('keydown', function(event) {
-           if (event.key === 'Enter' || event.key === ' ') {
-               event.preventDefault();
-               tutorModeDropdown.style.display = tutorModeDropdown.style.display === 'block' ? 'none' : 'block';
-               tutorModeButton.setAttribute('aria-expanded', tutorModeDropdown.style.display === 'block');
-           }
-       });
-   
-       // Close the dropdown when focus is lost
-       tutorModeDropdown.addEventListener('focusout', function(event) {
-           if (!tutorModeDropdown.contains(event.relatedTarget)) {
-               tutorModeDropdown.style.display = 'none';
-               tutorModeButton.setAttribute('aria-expanded', 'false');
            }
        });
    
@@ -1187,13 +1223,21 @@ async function handleDrop(e) {
                         // Inform the user that the file was uploaded
                         appendMessage('System', `File "${file.name}" uploaded successfully.`);
 
-                        // Optionally, display the file name in the chat
+                        // Optionally, display the file name in the chat afw
                         appendFileLink(file.name);
                     } else {
                         const errorData = await response.json();
-                        console.error('Upload error:', errorData.error);
-                        appendMessage('System', `Error uploading file: ${errorData.error}`);
-                    }
+                            console.error('Upload error:', errorData.error);
+                            appendMessage('System', `Error uploading file: ${errorData.error}`);
+
+                            // Display the popup if the error is about unsupported file type
+                            if (errorData.error.includes('Unsupported file type')) {
+                                const fileExtension = getFileExtension(file.name);
+                                displayPopup(`Document type .${fileExtension} not supported`);
+                            } else {
+                                displayPopup(`Error uploading file: ${errorData.error}`);
+                            }
+                        }
                 } catch (error) {
                     console.error('Error uploading file:', error);
                     appendMessage('System', 'An error occurred while uploading the file.');
@@ -1203,26 +1247,6 @@ async function handleDrop(e) {
         fileUploadInProgress = false;  // Clear the upload flag
     }
 }
-
-async function updateChatsVisibility() {
-    const querySpec = {
-        query: 'SELECT * FROM c WHERE NOT IS_DEFINED(c.visibility)',
-    };
-
-    const { resources: chats } = await container.items.query(querySpec).fetchAll();
-
-    for (const chat of chats) {
-        chat.visibility = 1;
-        await container.items.upsert(chat);
-    }
-}
-
-// Call the function
-updateChatsVisibility().then(() => {
-    console.log('Updated visibility for existing chats.');
-}).catch(error => {
-    console.error('Error updating chats:', error);
-});
 
 function deleteChat(chatId) {
     fetch(`/chats/${chatId}`, {
