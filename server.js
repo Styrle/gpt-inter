@@ -19,8 +19,8 @@ const removeMarkdown = require('remove-markdown');
 
 
 
-// Load environment variables from .env file
-dotenv.config();
+// Load environment variables from .env file awf
+dotenv.config(); 
 
 const app = express();
 const port = 8080;
@@ -260,7 +260,6 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
         return res.status(401).json({ error: 'User not authenticated' });
     }
 
-
     if (!file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -282,59 +281,68 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
             const { data: { text } } = await tesseract.recognize(file.buffer);
             extractedText = text;
         } else {
-            // Existing code for handling other file types
             const extension = path.extname(file.originalname).toLowerCase();
             const mimetype = mime.lookup(extension) || file.mimetype;
 
             // Extract text based on file type
-            if (mimetype === 'application/pdf' || extension === '.pdf') {
-                const data = await pdfParse(file.buffer);
-                extractedText = data.text;
-            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx') {
-                const { value } = await mammoth.extractRawText({ buffer: file.buffer });
-                extractedText = value;
-            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx') {
-                const workbook = xlsx.read(file.buffer, { type: 'buffer' });
-                const sheetNames = workbook.SheetNames;
-                sheetNames.forEach(sheetName => {
-                    const sheet = workbook.Sheets[sheetName];
-                    extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
-                });
-            } else if (mimetype === 'text/plain' || extension === '.txt') {
-                extractedText = file.buffer.toString('utf-8');
-            } else if (mimetype === 'text/markdown' || extension === '.md') {
-                const markdownContent = file.buffer.toString('utf-8');
-                extractedText = removeMarkdown(markdownContent);
-            } else if (mimetype === 'text/html' || extension === '.html' || extension === '.htm') {
-                const htmlContent = file.buffer.toString('utf-8');
-                extractedText = htmlToText(htmlContent, {
-                    wordwrap: 130,
-                });
-            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx') {
-                extractedText = await new Promise((resolve, reject) => {
-                    textract.fromBufferWithMime(file.mimetype, file.buffer, function (error, text) {
-                        if (error) {
-                            reject(error);
-                        } else {
-                            resolve(text);
-                        }
+            switch (true) {
+                case mimetype === 'application/pdf' || extension === '.pdf':
+                    const pdfData = await pdfParse(file.buffer);
+                    extractedText = pdfData.text;
+                    break;
+
+                case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx':
+                    const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+                    extractedText = value;
+                    break;
+
+                case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx':
+                    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+                    workbook.SheetNames.forEach(sheetName => {
+                        const sheet = workbook.Sheets[sheetName];
+                        extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
                     });
-                });
-            } else {
-                return res.status(400).json({ error: 'Unsupported file type.' });
+                    break;
+
+                case mimetype === 'text/plain' || extension === '.txt':
+                    extractedText = file.buffer.toString('utf-8');
+                    break;
+
+                case mimetype === 'text/markdown' || extension === '.md':
+                    const markdownContent = file.buffer.toString('utf-8');
+                    extractedText = removeMarkdown(markdownContent);
+                    break;
+
+                case mimetype === 'text/html' || extension === '.html' || extension === '.htm':
+                    const htmlContent = file.buffer.toString('utf-8');
+                    extractedText = htmlToText(htmlContent, { wordwrap: 130 });
+                    break;
+
+                case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx':
+                    extractedText = await new Promise((resolve, reject) => {
+                        textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
+                            if (err) reject(err);
+                            else resolve(text);
+                        });
+                    });
+                    break;
+
+                default:
+                    return res.status(400).json({ error: 'Unsupported file type.' });
             }
         }
 
+        // Retrieve or initialize the chat
         let chat = await getChatHistory(chatId);
-
         if (!chat) {
             chat = {
                 id: chatId,
                 title: 'File Upload',
                 messages: [],
                 timestamp: new Date().toISOString(),
-                total_document_count: 0,  // Initialize document count
-                total_document_size: 0,   // Initialize document size
+                total_document_count: 0,
+                total_document_size: 0,
+                documentContent: '',
             };
         }
 
@@ -346,40 +354,31 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
             chat.total_document_size = 0;
         }
 
-        // Increment the document count
+        // Increment document stats
         chat.total_document_count += 1;
-
-        // Add the document size to the total
         chat.total_document_size += file.size || 0;
 
-        // Optionally, store the size of the individual document in the message history
+        // Append new message entry for the uploaded file
         chat.messages.push({
             role: 'user',
             content: `Uploaded a document: ${file.originalname}`,
             timestamp: new Date().toISOString(),
-            tokens: 0, // Assuming no tokens for this message
-            documentSize: file.size || 0, // Store individual document size
+            // add tokens tokens: 0,
+            documentSize: file.size || 0,
         });
 
-        // Store the extracted text in the chat document
-        if (!chat.documentContent) {
-            chat.documentContent = extractedText;
-        } else {
-            // Append the new extracted text to existing content
-            chat.documentContent += '\n' + extractedText;
-        }
+        // Append extracted text to existing document content
+        chat.documentContent = (chat.documentContent || '') + '\n' + extractedText;
 
-        // Upsert the chat document
+        // Upsert chat with updated content
         await upsertChatHistory(chat);
 
         res.status(200).json({ success: true });
-
     } catch (error) {
         console.error('Error processing file:', error);
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
     }
 });
-
 
 
 // Endpoint to handle user messages and interact with OpenAI
@@ -436,7 +435,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
         }
 
         // Build messages array from existing chat history
-        let messages = chat.messages.slice(-5).map(msg => ({
+        let messages = chat.messages.slice(-20).map(msg => ({
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp,
@@ -591,8 +590,8 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
         if (isNewChat) {
             // Generate chat title using OpenAI
             const titlePrompt = [
-                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation.' },
-                { role: 'user', content: message || 'New Conversation' } // Use default if message is undefined
+                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation and contain no quotations or quotation marks.' },
+                { role: 'user', content: message || 'New Conversation' }
             ];
 
             // Prepare payload for OpenAI
