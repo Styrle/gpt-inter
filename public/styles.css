@@ -105,6 +105,31 @@ body.no-chat-scroll .chat-window {
 /* =======================================
    CHAT WINDOW & CHAT BOX
 ======================================= */
+=======
+    overflow-y: auto; /* Enable scrolling on the body */
+}
+
+/* Replicate the scrollbar styling from #chat-box for the body in collapsed mode */
+body.no-chat-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+
+body.no-chat-scroll::-webkit-scrollbar-track {
+    background: #f0f0f0;
+}
+
+body.no-chat-scroll::-webkit-scrollbar-thumb {
+    background-color: #c0c0c0;
+    border-radius: 4px;
+}
+
+body.no-chat-scroll #chat-box {
+    overflow: visible;
+}
+
+body.no-chat-scroll .chat-window {
+    overflow: visible;
+}
 
 .chat-window {
     flex: 1;
@@ -183,7 +208,21 @@ body.no-chat-scroll .chat-window {
     position: relative;
     bottom: 0;
     width: 100%;
-    box-sizing: border-box;
+    box-sizing: border-box; /* Ensure padding is included in the total width */
+}
+
+.input-container.collapsed {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background-color: #f0f0f0;
+}
+
+.attach-icon {
+    cursor: pointer;
+    font-size: 24px;
+    margin-right: 10px;
+    color: #909095 !important;
 }
 
 .input-container.collapsed {
