@@ -1,7 +1,11 @@
+// ========================================
+// Load Environment & Dependencies
+// ========================================
+require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
@@ -10,111 +14,42 @@ const mammoth = require('mammoth');
 const xlsx = require('xlsx');
 const tesseract = require('tesseract.js');
 const { CosmosClient } = require("@azure/cosmos");
-const dotenv = require('dotenv');
 const helmet = require('helmet');
 const textract = require('textract');
 const { htmlToText } = require('html-to-text');
 const mime = require('mime-types');
 const removeMarkdown = require('remove-markdown');
 
+// Lazy load node-fetch to avoid runtime overhead if not used
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-
-// Load environment variables from .env file awf
-dotenv.config(); 
-
+// ========================================
+// Configuration
+// ========================================
 const app = express();
 const port = 8080;
+const isDevelopment = process.env.NODE_ENV === 'development';
+const NINETY_DAYS_IN_MS = 90 * 24 * 60 * 60 * 1000;
 
+// ========================================
+// OpenAI & Cosmos DB Setup
+// ========================================
+const openai = new OpenAI({ apiKey: process.env.AZURE_OPENAI_API_KEY });
+const client = new CosmosClient({
+    endpoint: process.env.COSMOS_DB_ENDPOINT,
+    key: process.env.COSMOS_DB_KEY,
+});
+const database = client.database(process.env.COSMOS_DB_DATABASE_ID);
+const container = database.container(process.env.COSMOS_DB_CONTAINER_ID);
+
+// ========================================
+// File Upload Setup (in-memory)
+// ========================================
 const upload = multer({ storage: multer.memoryStorage() });
 
-const openai = new OpenAI({
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-});
-
-async function getUserInfo(req, res, next) {
-    const header = req.headers['x-ms-client-principal'];
-
-    if (header) {
-        try {
-            const buffer = Buffer.from(header, 'base64');
-            const user = JSON.parse(buffer.toString('ascii'));
-
-            // Extract email from claims
-            if (user && user.claims) {
-                const emailClaim = user.claims.find(claim => claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress');
-                if (emailClaim) {
-                    user.email = emailClaim.val;
-                } else {
-                    console.error('Email claim not found in user claims');
-                }
-
-                const nameClaim = user.claims.find(claim =>
-                    claim.typ === 'name' ||
-                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
-                );
-                if (nameClaim) {
-                    user.name = nameClaim.val;
-                }
-            } else {
-                console.error('User claims not found');
-            }
-
-            req.user = user;
-            next();
-        } catch (error) {
-            console.error('Error parsing x-ms-client-principal header:', error);
-            next();
-        }
-    } else {
-        console.error('x-ms-client-principal header not found');
-
-        // Fetch user info from /.auth/me
-        (async () => {
-            try {
-                const authMeResponse = await fetch(`https://${req.get('host')}/.auth/me`, {
-                    headers: {
-                        'Cookie': req.headers['cookie'],
-                    },
-                });
-
-                if (authMeResponse.ok) {
-                    const data = await authMeResponse.json();
-                    if (data.length > 0 && data[0].user_claims) {
-                        const user = {
-                            claims: data[0].user_claims,
-                        };
-
-                        // Extract email from claims
-                        const emailClaim = user.claims.find(claim => claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress');
-                        if (emailClaim) {
-                            user.email = emailClaim.val;
-                        } else {
-                            console.error('Email claim not found in user claims from /.auth/me');
-                        }
-
-                        const nameClaim = user.claims.find(claim =>
-                            claim.typ === 'name' ||
-                            claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
-                        );
-                        if (nameClaim) {
-                            user.name = nameClaim.val;
-                        }
-
-                        req.user = user;
-                    } else {
-                        console.error('No user claims found in /.auth/me response');
-                    }
-                } else {
-                    console.error('Failed to fetch /.auth/me:', authMeResponse.statusText);
-                }
-            } catch (error) {
-                console.error('Error fetching /.auth/me:', error);
-            }
-            next();
-        })();
-    }
-}
-
+// ========================================
+// Middleware: Session and Security
+// ========================================
 app.use(session({
     secret: process.env.SESSION_SECRET || 'defaultSecret3',
     resave: false,
@@ -122,68 +57,12 @@ app.use(session({
     cookie: { 
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // Cookie expiration
+        maxAge: 24 * 60 * 60 * 1000,
     },
 }));
 
-const isDevelopment = process.env.NODE_ENV === 'development';
-
-if (isDevelopment) {
-  // Mock authentication middleware for development
-  app.use((req, res, next) => {
-    if (req.session && req.session.user) {
-      req.user = req.session.user;
-    } else {
-      req.user = {
-        email: 'JSerpis@delta.kaplaninc.com',
-        name: 'Test User',
-        userRoles: ['authenticated'],
-      };
-      req.session.user = req.user;
-    }
-    next();
-  });
-} else {
-  // Use the getUserInfo middleware in production
-  app.use(getUserInfo);
-}
-
-
-function ensureAuthenticated(req, res, next) {
-    if (req.user && req.user.email) {
-      return next();
-    }
-  
-    // Handle unauthenticated access
-    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
-      res.status(401).json({ error: 'Unauthorized' });
-    } else {
-      if (process.env.NODE_ENV === 'development') {
-        // In development, simulate authentication
-        req.user = {
-          email: 'JSerpis@delta.kaplaninc.com',
-          name: 'Test User',
-          userRoles: ['authenticated'],
-        };
-        return next();
-      } else {
-        // In production, redirect to login
-        res.redirect('/login');
-      }
-    }
-  }
-
-app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
-});
-
 app.use(express.json());
 app.use(express.static('public'));
-
-const client = new CosmosClient({
-    endpoint: process.env.COSMOS_DB_ENDPOINT,
-    key: process.env.COSMOS_DB_KEY,
-});
 
 app.use(helmet({
     contentSecurityPolicy: {
@@ -191,32 +70,131 @@ app.use(helmet({
             defaultSrc: ["'self'", "https://login.microsoftonline.com"],
             scriptSrc: ["'self'", "https://login.microsoftonline.com"],
             connectSrc: ["'self'", "https://login.microsoftonline.com"],
-      },
+        },
     },
-  }));
+}));
 
-// Get a reference to the database and container
-const database = client.database(process.env.COSMOS_DB_DATABASE_ID);
-const container = database.container(process.env.COSMOS_DB_CONTAINER_ID);
+// ========================================
+// Authentication Middleware
+// ========================================
+async function getUserInfo(req, res, next) {
+    const header = req.headers['x-ms-client-principal'];
 
+    if (header) {
+        try {
+            const user = JSON.parse(Buffer.from(header, 'base64').toString('ascii'));
+            if (user && user.claims) {
+                const emailClaim = user.claims.find(claim =>
+                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
+                );
+                if (emailClaim) user.email = emailClaim.val;
+                
+                const nameClaim = user.claims.find(claim =>
+                    claim.typ === 'name' ||
+                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                );
+                if (nameClaim) user.name = nameClaim.val;
+
+            } else {
+                console.error('User claims not found');
+            }
+            req.user = user;
+            return next();
+        } catch (error) {
+            console.error('Error parsing x-ms-client-principal header:', error);
+            return next();
+        }
+    } else {
+        console.error('x-ms-client-principal header not found');
+
+        // Attempt to fetch user info from /.auth/me
+        try {
+            const authMeResponse = await fetch(`https://${req.get('host')}/.auth/me`, {
+                headers: { 'Cookie': req.headers['cookie'] },
+            });
+
+            if (authMeResponse.ok) {
+                const data = await authMeResponse.json();
+                if (data.length > 0 && data[0].user_claims) {
+                    const user = { claims: data[0].user_claims };
+                    const emailClaim = user.claims.find(claim =>
+                        claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
+                    );
+                    if (emailClaim) user.email = emailClaim.val;
+
+                    const nameClaim = user.claims.find(claim =>
+                        claim.typ === 'name' ||
+                        claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                    );
+                    if (nameClaim) user.name = nameClaim.val;
+
+                    req.user = user;
+                } else {
+                    console.error('No user claims found in /.auth/me response');
+                }
+            } else {
+                console.error('Failed to fetch /.auth/me:', authMeResponse.statusText);
+            }
+        } catch (error) {
+            console.error('Error fetching /.auth/me:', error);
+        }
+        next();
+    }
+}
+
+function ensureAuthenticated(req, res, next) {
+    if (req.user && req.user.email) return next();
+
+    // Handle unauthenticated access
+    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
+        return res.status(401).json({ error: 'Unauthorized' });
+    } else if (isDevelopment) {
+        // In development, simulate authentication
+        req.user = {
+            email: 'JSerpis@delta.kaplaninc.com',
+            name: 'Test User',
+            userRoles: ['authenticated'],
+        };
+        return next();
+    } else {
+        return res.redirect('/login');
+    }
+}
+
+// Mock authentication for development
+if (isDevelopment) {
+    app.use((req, res, next) => {
+        if (req.session && req.session.user) {
+            req.user = req.session.user;
+        } else {
+            req.user = {
+                email: 'JSerpis@delta.kaplaninc.com',
+                name: 'Test User',
+                userRoles: ['authenticated'],
+            };
+            req.session.user = req.user;
+        }
+        next();
+    });
+} else {
+    app.use(getUserInfo);
+}
+
+// ========================================
+// Helper Functions: Chat Database Access
+// ========================================
 async function getChatHistory(chatId) {
     try {
         const { resource: chat } = await container.item(chatId, chatId).read();
         return chat;
     } catch (error) {
-        if (error.code === 404) {
-            // Chat not found
-            return null;
-        } else {
-            throw error;
-        }
+        if (error.code === 404) return null;
+        throw error;
     }
 }
 
-// Helper function to upsert chat history into Cosmos DB
 async function upsertChatHistory(chat) {
     try {
-        // Add a new chat if it does not exist or update the existing chat
         await container.items.upsert(chat, { partitionKey: chat.id });
     } catch (error) {
         console.error('Error upserting chat history:', error);
@@ -224,7 +202,6 @@ async function upsertChatHistory(chat) {
     }
 }
 
-// Function to categorize chat by date
 function categorizeChat(timestamp) {
     const chatDate = new Date(timestamp);
     const now = new Date();
@@ -233,42 +210,40 @@ function categorizeChat(timestamp) {
     const nowDateOnly = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
 
     const diffInDays = Math.floor((nowDateOnly - chatDateOnly) / (1000 * 60 * 60 * 24));
-
-    if (diffInDays === 0) {
-        return 'Today';
-    } else if (diffInDays === 1) {
-        return 'Yesterday';
-    } else if (diffInDays <= 7) {
-        return 'Previous 7 Days';
-    } else if (diffInDays <= 30) {
-        return 'Previous 30 Days';
-    } else {
-        return 'Older';
-    }
+    if (diffInDays === 0) return 'Today';
+    if (diffInDays === 1) return 'Yesterday';
+    if (diffInDays <= 7) return 'Previous 7 Days';
+    if (diffInDays <= 30) return 'Previous 30 Days';
+    return 'Older';
 }
 
-// Endpoint to handle file uploads and extract content
+// ========================================
+// Routes
+// ========================================
+
+/**
+ * Returns session secret or user display name
+ */
+app.get('/session-secret', (req, res) => {
+    res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
+});
+
+/**
+ * File Upload Endpoint
+ * Extracts file content and updates chat document in Cosmos DB
+ */
 app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res) => {
     const file = req.file;
-    const chatId = req.body.chatId;
-
-    // Get userId from the authenticated user
+    const { chatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
     if (!req.user || !req.user.email) {
         console.error('User not authenticated or email not found');
         return res.status(401).json({ error: 'User not authenticated' });
     }
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!chatId) return res.status(400).json({ error: 'Missing chatId' });
 
-    if (!file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    if (!chatId) {
-        return res.status(400).json({ error: 'Missing chatId' });
-    }
-
-    // Validate that the chatId belongs to the current user
     if (!chatId.startsWith(`${userId}_chat_`)) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
@@ -276,26 +251,23 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
     try {
         let extractedText = '';
 
+        // Handle images with OCR (tesseract.js)
         if (file.mimetype.startsWith('image/')) {
-            // Use tesseract.js to extract text from the image
             const { data: { text } } = await tesseract.recognize(file.buffer);
             extractedText = text;
         } else {
             const extension = path.extname(file.originalname).toLowerCase();
             const mimetype = mime.lookup(extension) || file.mimetype;
 
-            // Extract text based on file type
             switch (true) {
                 case mimetype === 'application/pdf' || extension === '.pdf':
                     const pdfData = await pdfParse(file.buffer);
                     extractedText = pdfData.text;
                     break;
-
                 case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx':
                     const { value } = await mammoth.extractRawText({ buffer: file.buffer });
                     extractedText = value;
                     break;
-
                 case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx':
                     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
                     workbook.SheetNames.forEach(sheetName => {
@@ -303,21 +275,15 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
                         extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
                     });
                     break;
-
                 case mimetype === 'text/plain' || extension === '.txt':
                     extractedText = file.buffer.toString('utf-8');
                     break;
-
                 case mimetype === 'text/markdown' || extension === '.md':
-                    const markdownContent = file.buffer.toString('utf-8');
-                    extractedText = removeMarkdown(markdownContent);
+                    extractedText = removeMarkdown(file.buffer.toString('utf-8'));
                     break;
-
                 case mimetype === 'text/html' || extension === '.html' || extension === '.htm':
-                    const htmlContent = file.buffer.toString('utf-8');
-                    extractedText = htmlToText(htmlContent, { wordwrap: 130 });
+                    extractedText = htmlToText(file.buffer.toString('utf-8'), { wordwrap: 130 });
                     break;
-
                 case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx':
                     extractedText = await new Promise((resolve, reject) => {
                         textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
@@ -326,13 +292,11 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
                         });
                     });
                     break;
-
                 default:
                     return res.status(400).json({ error: 'Unsupported file type.' });
             }
         }
 
-        // Retrieve or initialize the chat
         let chat = await getChatHistory(chatId);
         if (!chat) {
             chat = {
@@ -346,103 +310,88 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
             };
         }
 
-        // Initialize document tracking fields if they don't exist
-        if (typeof chat.total_document_count !== 'number') {
-            chat.total_document_count = 0;
-        }
-        if (typeof chat.total_document_size !== 'number') {
-            chat.total_document_size = 0;
-        }
+        // Ensure fields
+        if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+        if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // Increment document stats
+        // Update document stats
         chat.total_document_count += 1;
         chat.total_document_size += file.size || 0;
 
-        // Append new message entry for the uploaded file
+        // Append a message referencing the uploaded document
         chat.messages.push({
             role: 'user',
             content: `Uploaded a document: ${file.originalname}`,
             timestamp: new Date().toISOString(),
-            // add tokens tokens: 0,
             documentSize: file.size || 0,
         });
 
-        // Append extracted text to existing document content
+        // Append extracted text to the chat's stored document content
         chat.documentContent = (chat.documentContent || '') + '\n' + extractedText;
 
-        // Upsert chat with updated content
         await upsertChatHistory(chat);
-
         res.status(200).json({ success: true });
+
     } catch (error) {
         console.error('Error processing file:', error);
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
     }
 });
 
-
-// Endpoint to handle user messages and interact with OpenAI
+/**
+ * Chat Endpoint
+ * Interacts with OpenAI and returns AI responses
+ */
 app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) => {
     const { message, tutorMode } = req.body;
     const file = req.file;
-
-    // Get userId from the authenticated user
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    // If no chatId is provided in the request, generate one
     let { chatId } = req.body;
     if (!chatId) {
-        const randomNumber = Math.random().toString(36).substr(2, 9);  // Generate a unique number
-        chatId = `${userId}_chat_${randomNumber}`;  // Format: "userId_chat_number"
+        const randomNumber = Math.random().toString(36).substr(2, 9);
+        chatId = `${userId}_chat_${randomNumber}`;
     }
 
-    // Validate that either a message or file is present
     if (!message && !file) {
         return res.status(400).json({ error: 'Missing message or file' });
     }
 
     try {
-        console.log(`Received message: "${message}" with Tutor Mode: ${tutorMode ? 'ON' : 'OFF'} and chatId: ${chatId}`);
-
-        // Retrieve existing chat history or create a new one
+        console.log(`Received message: "${message}" Tutor Mode: ${tutorMode ? 'ON' : 'OFF'} chatId: ${chatId}`);
         let chat = await getChatHistory(chatId);
+        const isNewChat = !chat;
 
-        let isNewChat = false;
         if (!chat) {
-            isNewChat = true;
             chat = {
                 id: chatId,
-                title: 'New Chat', // Temporary title
-                visibility: 1,     // Set visibility to 1 (visible)
+                title: 'New Chat',
+                visibility: 1,
                 messages: [],
-                timestamp: new Date().toISOString(), // Chat creation timestamp
-                total_tokens_used: 0,  // Initialize token counter
-                total_interactions: 0, // Initialize interaction counter
-                average_tokens_per_interaction: 0, // Initialize average token usage
-                total_image_count: 0, // Initialize image count
-                total_image_size: 0, // Initialize total image size
-                total_document_count: 0, // Initialize document count
-                total_document_size: 0, // Initialize document size
+                timestamp: new Date().toISOString(),
+                total_tokens_used: 0,
+                total_interactions: 0,
+                average_tokens_per_interaction: 0,
+                total_image_count: 0,
+                total_image_size: 0,
+                total_document_count: 0,
+                total_document_size: 0,
             };
         }
 
-        // Initialize document tracking fields if they don't exist
-        if (typeof chat.total_document_count !== 'number') {
-            chat.total_document_count = 0;
-        }
-        if (typeof chat.total_document_size !== 'number') {
-            chat.total_document_size = 0;
-        }
+        // Ensure numeric fields
+        if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+        if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // Build messages array from existing chat history
+        // Prepare conversation history
         let messages = chat.messages.slice(-20).map(msg => ({
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp,
-            tokens: msg.tokens // Keep the previous token counts
+            tokens: msg.tokens
         }));
 
-        // Add system message
+        // System role message
         const systemMessage = {
             role: 'system',
             content: tutorMode
@@ -452,7 +401,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
         };
         messages.unshift(systemMessage);
 
-        // Add user message if present and not an image
+        // Add user message if provided (not an image message)
         if (message && (!file || !file.mimetype.startsWith('image/'))) {
             messages.push({
                 role: 'user',
@@ -461,7 +410,7 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
             });
         }
 
-        // Handle image upload if present
+        // Handle image upload if provided
         if (file && file.mimetype.startsWith('image/')) {
             const base64Image = file.buffer.toString('base64');
             const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
@@ -469,61 +418,42 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
             messages.push({
                 role: 'user',
                 content: [
-                    {
-                        "type": "text",
-                        "text": message || 'Please analyze the following image:',
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": imageUrl,
-                        },
-                    },
+                    { "type": "text", "text": message || 'Please analyze the following image and remeber it throughout the chat:' },
+                    { "type": "image_url", "image_url": { "url": imageUrl } },
                 ],
                 timestamp: new Date().toISOString(),
             });
 
-            // Initialize image tracking fields if they don't exist
-            if (typeof chat.total_image_count !== 'number') {
-                chat.total_image_count = 0;
-            }
-            if (typeof chat.total_image_size !== 'number') {
-                chat.total_image_size = 0;
-            }
+            if (typeof chat.total_image_count !== 'number') chat.total_image_count = 0;
+            if (typeof chat.total_image_size !== 'number') chat.total_image_size = 0;
 
-            // Increment the image count
             chat.total_image_count += 1;
-
-            // Add the image size to the total
             chat.total_image_size += file.size || 0;
 
-            // Optionally, you can store the size of the individual image in the message history if needed
             chat.messages.push({
                 role: 'user',
                 content: message || 'Sent an image',
                 timestamp: new Date().toISOString(),
-                tokens: 0, // Assuming no tokens for image message
-                imageSize: file.size || 0, // Store individual image size
+                tokens: 0,
+                imageSize: file.size || 0,
             });
         }
 
-        // Handle document content if it exists in chat
+        // Include document content if available
         if (chat.documentContent) {
             messages.push({
                 role: 'user',
                 content: `Here is the document content:\n${chat.documentContent}`,
                 timestamp: new Date().toISOString(),
             });
-            // Do not delete chat.documentContent; let it persist across messages
         }
 
-        // Prepare payload for OpenAI
+        // Prepare request payload for OpenAI
         const payload = {
             model: 'gpt-4o',
             messages: messages,
         };
 
-        // Make API call to OpenAI
         const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
             method: 'POST',
             headers: {
@@ -541,66 +471,53 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
 
         const data = await response.json();
         const aiResponse = data.choices[0].message.content;
-
-        // Token information from the response
         const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
 
         console.log('AI Response:', aiResponse);
-        console.log(`Tokens used - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
+        console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
 
-        // Append new user messages to chat history without image data
+        // Append new user message to chat history
         if (message && (!file || !file.mimetype.startsWith('image/'))) {
             chat.messages.push({
                 role: 'user',
                 content: message,
                 timestamp: new Date().toISOString(),
-                tokens: prompt_tokens, // Add input tokens for user message
+                tokens: prompt_tokens,
             });
         }
 
         if (file && file.mimetype.startsWith('image/')) {
-            // Do not include image data in chat history
             chat.messages.push({
                 role: 'user',
                 content: message || 'Sent an image',
                 timestamp: new Date().toISOString(),
-                tokens: prompt_tokens, // Add input tokens for image message
+                tokens: prompt_tokens,
             });
         }
 
-        // Add assistant's message with token count
+        // Add assistant message
         chat.messages.push({
             role: 'assistant',
             content: aiResponse,
             timestamp: new Date().toISOString(),
-            tokens: completion_tokens, // Add output tokens for AI response
+            tokens: completion_tokens,
         });
 
-        // Update overall token usage for the chat session
-        chat.total_tokens_used += total_tokens;  // Accumulate total tokens used
-        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions
-
-        // Calculate the average tokens per interaction
+        // Update chat stats
+        chat.total_tokens_used += total_tokens;
+        chat.total_interactions += 2;
         chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
-
-        // Update timestamp for the overall chat
         chat.timestamp = new Date().toISOString();
 
-        // If this is a new chat, generate a title
+        // Generate title if new chat
         if (isNewChat) {
-            // Generate chat title using OpenAI
             const titlePrompt = [
-                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation and contain no quotations or quotation marks.' },
-                { role: 'user', content: message || 'New Conversation' }
+                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
+                { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
             ];
 
-            // Prepare payload for OpenAI
-            const titlePayload = {
-                model: 'gpt-4o',
-                messages: titlePrompt,
-            };
+            const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
 
-            // Make API call to OpenAI
             const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
                 method: 'POST',
                 headers: {
@@ -610,22 +527,17 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
                 body: JSON.stringify(titlePayload),
             });
 
-            if (!titleResponse.ok) {
-                const errorText = await titleResponse.text();
-                console.error('Error from OpenAI API when generating title:', errorText);
-                // Proceed without updating the title
-            } else {
+            if (titleResponse.ok) {
                 const titleData = await titleResponse.json();
                 const generatedTitle = titleData.choices[0].message.content.trim();
-                // Update the chat's title
                 chat.title = generatedTitle;
+            } else {
+                const errorText = await titleResponse.text();
+                console.error('Error generating title:', errorText);
             }
         }
 
-        // Upsert the chat document into Cosmos DB
         await upsertChatHistory(chat);
-
-        // Categorize the chat based on timestamp
         const category = categorizeChat(chat.timestamp);
 
         res.json({ 
@@ -645,36 +557,28 @@ app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) 
     }
 });
 
-// Endpoint to get the list of chat sessions with categories
+/**
+ * Retrieve all chats for the authenticated user, categorized by date
+ */
 app.get('/chats', ensureAuthenticated, async (req, res) => {
     try {
-        // Get userId from the authenticated user
         const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-        // Query for all chats including visibility
-        const querySpec = {
-            query: 'SELECT c.id, c.title, c.timestamp, c.visibility FROM c',
-        };
-
+        // Query all chats for the container
+        const querySpec = { query: 'SELECT c.id, c.title, c.timestamp, c.visibility FROM c' };
         const { resources: chats } = await container.items.query(querySpec).fetchAll();
 
+        // Filter by current user's chats
+        const filteredChats = chats.filter(chat => chat.id.startsWith(`${userId}_chat_`));
         const categorizedChats = {};
 
-        // Filter chats that belong to the current user
-        const filteredChats = chats.filter(chat => chat.id.startsWith(`${userId}_chat_`));
-
-        // Categorize the chats based on date
         filteredChats.forEach(chat => {
             const category = categorizeChat(chat.timestamp);
-
-            if (!categorizedChats[category]) {
-                categorizedChats[category] = [];
-            }
-
+            if (!categorizedChats[category]) categorizedChats[category] = [];
             categorizedChats[category].push({
                 chatId: chat.id,
                 title: chat.title,
-                visibility: chat.visibility, // Include visibility
+                visibility: chat.visibility,
             });
         });
 
@@ -685,79 +589,63 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
     }
 });
 
-// Endpoint to retrieve a specific chat history
+/**
+ * Retrieve a specific chat history
+ */
 app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     const { chatId } = req.params;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    // Check if the chatId belongs to the current user
     if (!chatId.startsWith(`${userId}_chat_`)) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
 
     try {
         const chat = await getChatHistory(chatId);
-
-        if (chat) {
-            res.json(chat);
-        } else {
-            res.status(404).json({ error: 'Chat not found' });
-        }
+        if (chat) res.json(chat);
+        else res.status(404).json({ error: 'Chat not found' });
     } catch (error) {
         console.error('Error retrieving chat:', error);
         res.status(500).json({ error: 'Failed to retrieve chat' });
     }
 });
 
+/**
+ * Update chat visibility to "not visible"
+ */
 app.delete('/chats/:chatId', async (req, res) => {
     const { chatId } = req.params;
-
     try {
-        // Retrieve the chat document
         const { resource: chat } = await container.item(chatId, chatId).read();
+        if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
-        if (chat) {
-            // Update visibility to 2 (not visible)
-            chat.visibility = 2;
-
-            // Upsert the chat document to update it in the database
-            await upsertChatHistory(chat);
-
-            res.json({ message: 'Chat visibility updated' });
-        } else {
-            res.status(404).json({ error: 'Chat not found' });
-        }
+        chat.visibility = 2;
+        await upsertChatHistory(chat);
+        res.json({ message: 'Chat visibility updated' });
     } catch (error) {
         console.error('Error updating chat visibility:', error);
         res.status(500).json({ error: 'Failed to update chat visibility' });
     }
 });
 
+/**
+ * Delete old chat fields (older than 90 days)
+ */
 async function deleteOldChats() {
     try {
-        const querySpec = {
-            query: 'SELECT * FROM c'
-        };
-
+        const querySpec = { query: 'SELECT * FROM c' };
         const { resources: chats } = await container.items.query(querySpec).fetchAll();
 
         const now = new Date();
-        const ninetyDaysInMillis = 90 * 24 * 60 * 60 * 1000; // 90 days in milliseconds
-
         for (const chat of chats) {
             const chatTimestamp = new Date(chat.timestamp);
-            const ageInMillis = now - chatTimestamp;
-
-            if (ageInMillis > ninetyDaysInMillis) {
-                // Chat is older than 90 days, delete specified fields
+            if ((now - chatTimestamp) > NINETY_DAYS_IN_MS) {
                 delete chat.messages;
                 delete chat.timestamp;
                 delete chat.total_document_count;
                 delete chat.total_image_count;
-
-                // Upsert the updated chat document back into the database
                 await container.items.upsert(chat, { partitionKey: chat.id });
-                console.log(`Updated chat with ID: ${chat.id} by deleting specified fields.`);
+                console.log(`Updated chat with ID: ${chat.id} by deleting specified fields (older than 90 days).`);
             }
         }
     } catch (error) {
@@ -765,52 +653,46 @@ async function deleteOldChats() {
     }
 }
 
-// Run the deletion check immediately on server start
+// Run old chat cleanup on startup and every 24 hours
 deleteOldChats();
+setInterval(deleteOldChats, 24 * 60 * 60 * 1000);
 
-// Schedule the old chat deletion to run every 24 hours
-setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
-
+// ========================================
+// Auth Routes for Development & Production
+// ========================================
 if (isDevelopment) {
-    // Mock /login route for development
     app.get('/login', (req, res) => {
-      // Simulate login by setting req.user
-      req.user = {
-        userId: 'test-user-id',
-        userDetails: 'Test User',
-        userRoles: ['authenticated'],
-      };
-      res.redirect('/');
+        req.user = { userId: 'test-user-id', userDetails: 'Test User', userRoles: ['authenticated'] };
+        res.redirect('/');
     });
-  
-    // Mock /logout route for development
-    app.get('/logout', (req, res) => {
-      // Simulate logout by clearing req.user
-      req.user = null;
-      res.redirect('/');
-    });
-  } else {
-    // Production routes
-    app.get('/login', (req, res) => {
-      res.redirect('/.auth/login/aad');
-    });
-  
-    app.get('/logout', (req, res) => {
-      res.redirect('/.auth/logout');
-    });
-  }
 
-  app.get('/user-info', ensureAuthenticated, (req, res) => {
+    app.get('/logout', (req, res) => {
+        req.user = null;
+        res.redirect('/');
+    });
+} else {
+    app.get('/login', (req, res) => res.redirect('/.auth/login/aad'));
+    app.get('/logout', (req, res) => res.redirect('/.auth/logout'));
+}
+
+/**
+ * Returns user info
+ */
+app.get('/user-info', ensureAuthenticated, (req, res) => {
     const userId = req.user.email;
     res.json({ userId });
 });
 
+// Debug middleware
 app.use((req, res, next) => {
     console.log('Authenticated user:', req.user);
     next();
-  });
+});
 
-// Start the server on the specified port
+// ========================================
+// Start the Server
+// ========================================
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
+
