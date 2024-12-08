@@ -1336,6 +1336,7 @@ window.onload = async () => {
 
         const data = await response.json();
         sessionStorage.setItem('userId', data.userId);
+        sessionStorage.setItem('userName', data.userName);
 
         chatId = sessionStorage.getItem('chatId') || generateChatId();
         sessionStorage.setItem('chatId', chatId);
@@ -1347,3 +1348,12 @@ window.onload = async () => {
         window.location.href = '/login'; // Redirect to login on error
     }
 };
+
+// Update the showWelcomeScreen function:
+function showWelcomeScreen() {
+    const welcomeContainer = document.getElementById('welcome-container');
+    const userName = sessionStorage.getItem('userName') || 'User';
+    welcomeContainer.style.display = 'block'; // Show the welcome screen
+    const welcomeMessage = welcomeContainer.querySelector('p');
+    welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
+}
