@@ -191,98 +191,110 @@ async function loadChatHistory() {
 
         const chats = await res.json();
 
-        chatHistoryList.innerHTML = ''; // Clear the existing list
+        // Clear the existing chat history list
+        chatHistoryList.innerHTML = '';
 
-        // Define the desired category order, with 'Today' at the top
+        // Define the category order
         const orderedCategories = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
 
-        // Filter only the categories that are present in the fetched chats
+        // Filter only the categories present in the fetched chats
         const availableCategories = orderedCategories.filter(category => chats[category]);
 
-        // Loop through the ordered categories and render the chat items
-        availableCategories.forEach(category => {
+        // Loop through the categories and render the chat items
+        for (const category of availableCategories) {
+            // Create and append category heading
             const categoryItem = document.createElement('li');
             categoryItem.textContent = category;
             categoryItem.classList.add('chat-category-list');
             chatHistoryList.appendChild(categoryItem);
 
             const chatItems = document.createElement('ul');
-
             const reversedChats = chats[category].slice().reverse();
 
-            // Append each chat item
-            reversedChats.forEach(chat => {
+            for (const chat of reversedChats) {
+                // Create the chat item container
                 const chatItem = document.createElement('li');
                 chatItem.dataset.chatId = chat.chatId;
                 chatItem.classList.add('chat-item');
                 chatItem.setAttribute('role', 'group');
-                chatItem.setAttribute('aria-label', `Chat item for ${chat.title}`);
+                chatItem.setAttribute('aria-label', `Chat item for ${sanitizeText(chat.title)}`);
 
-                // Event listener for click on chatItem
+                // Add click event listener to load chat
                 chatItem.addEventListener('click', () => loadChat(chat.chatId));
 
                 // Add focus and blur event listeners for active state
-                chatItem.addEventListener('focus', function() {
-                    chatItem.classList.add('active');
-                });
-                chatItem.addEventListener('blur', function() {
-                    chatItem.classList.remove('active');
-                });
+                chatItem.addEventListener('focus', () => chatItem.classList.add('active'));
+                chatItem.addEventListener('blur', () => chatItem.classList.remove('active'));
 
-                // Create a span for the chat title
+                // Create and sanitize the chat title
                 const chatTitle = document.createElement('span');
-                chatTitle.textContent = chat.title;
+                chatTitle.textContent = sanitizeText(chat.title);
                 chatTitle.classList.add('chat-title');
                 chatTitle.setAttribute('tabindex', '0'); // Make focusable
                 chatTitle.setAttribute('role', 'button'); // Semantics for screen readers
-                chatTitle.setAttribute('aria-label', `Chat titled ${chat.title}`); // Descriptive label
+                chatTitle.setAttribute('aria-label', `Chat titled ${sanitizeText(chat.title)}`);
 
-                // Event listener for click on chatTitle
+                // Attach input validation logic to the chat title
+                chatTitle.addEventListener('input', () => validateChatTitle(chatTitle));
+
+                // Add click event listener to load chat
                 chatTitle.addEventListener('click', () => loadChat(chat.chatId));
 
-                // Keyboard event listener for Enter and Space keys on chatTitle
-                chatTitle.addEventListener('keydown', async function(event) {
+                // Add keyboard event listener for Enter and Space keys
+                chatTitle.addEventListener('keydown', async function (event) {
                     if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         await loadChat(chat.chatId);
-                        // No need to call chatInput.focus() here if it's called inside loadChat
                     }
                 });
 
-                // Create the bin icon button
+                // Create delete button
                 const binIconButton = document.createElement('button');
                 binIconButton.classList.add('bin-icon-button');
-                binIconButton.setAttribute('aria-label', `Delete chat titled ${chat.title}`);
+                binIconButton.setAttribute('aria-label', `Delete chat titled ${sanitizeText(chat.title)}`);
 
                 const binIcon = document.createElement('i');
                 binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
-
                 binIconButton.appendChild(binIcon);
 
-                // Add click event to binIconButton
+                // Add click event to delete the chat
                 binIconButton.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent the click from triggering loadChat
+                    e.stopPropagation(); // Prevent click from triggering loadChat
                     deleteChat(chat.chatId);
                 });
 
-                // Append title and bin icon button to chatItem
+                // Append the chat title and delete button to the chat item
                 chatItem.appendChild(chatTitle);
                 chatItem.appendChild(binIconButton);
 
-                // Check the visibility property and set display accordingly
+                // Handle visibility
                 if (chat.visibility !== 1 && chat.visibility !== undefined) {
                     chatItem.style.display = 'none';
                 }
 
                 chatItems.appendChild(chatItem);
-            });
+            }
 
             chatHistoryList.appendChild(chatItems);
-        });
+        }
     } catch (error) {
         console.error('Error loading chat history:', error);
     }
 }
+
+// Helper function to sanitize chat titles
+function sanitizeText(text) {
+    return text.replace(/[^a-zA-Z0-9\s]/g, ''); // Allow only alphanumeric characters and spaces
+}
+
+// Helper function to validate chat title input dynamically
+function validateChatTitle(inputElement) {
+    const sanitizedText = inputElement.textContent.replace(/[^a-zA-Z0-9\s]/g, ''); // Remove invalid characters
+    if (inputElement.textContent !== sanitizedText) {
+        inputElement.textContent = sanitizedText; // Update if invalid characters are removed
+    }
+}
+
 
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
@@ -329,7 +341,36 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const messageContent = document.createElement("div");
     messageContent.classList.add("message-content");
 
-    // AI message handling
+    // Regex pattern now includes:
+    // - $$...$$
+    // - \( ... \)
+    // - $...$
+    // - \[ ... \]
+    const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
+
+    function processTextWithMarkdownAndMath(text) {
+        const mathSegments = [];
+        let placeholderIndex = 0;
+
+        // Extract math segments and replace them with placeholders
+        const textWithPlaceholders = text.replace(mathPattern, (match) => {
+            mathSegments.push(match);
+            return `%%%MATH${placeholderIndex++}%%%`;
+        });
+
+        // Convert markdown (excluding math) to HTML
+        const parsedHTML = marked.parse(textWithPlaceholders);
+
+        // Restore math segments
+        let finalHTML = parsedHTML;
+        mathSegments.forEach((segment, i) => {
+            // Insert the original math segment back into the final HTML
+            finalHTML = finalHTML.replace(`%%%MATH${i}%%%`, segment);
+        });
+
+        return finalHTML;
+    }
+
     if (sender === "AI") {
         const aiIcon = document.createElement("img");
         aiIcon.src = "images/K_logo.svg";
@@ -341,36 +382,29 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
         let entireMessage = '';
 
-        // Use a regex to split the content into normal text, code blocks, and MathJax
+        // Split text into normal segments and code blocks
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
         parts.forEach((part, index) => {
             if (index % 3 === 0) {
-                // Regular text or MathJax content
+                // Regular text may contain markdown & math
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
-                // Detect and handle MathJax syntax
-                if (/\$\$[\s\S]*\$\$|\\\([\s\S]*\\\)/.test(part)) {
-                    // MathJax block
-                    messageText.innerHTML = part.trim();
-                } else {
-                    // Markdown-rendered regular text
-                    const parsedText = marked.parse(part.trim());
-                    messageText.innerHTML = parsedText;
+                const finalHTML = processTextWithMarkdownAndMath(part.trim());
+                messageText.innerHTML = finalHTML;
 
-                    // Add 'table' class to any tables for consistent styling
-                    const tables = messageText.querySelectorAll('table');
-                    tables.forEach(table => {
-                        table.classList.add('table');
-                    });
-                }
+                // Add 'table' class to tables
+                const tables = messageText.querySelectorAll('table');
+                tables.forEach(table => {
+                    table.classList.add('table');
+                });
 
                 messageBody.appendChild(messageText);
                 entireMessage += part.trim();
             } else if (index % 3 === 1) {
-                // Capture language identifier (e.g., python, javascript)
+                // Language for the code block
                 var language = part.trim();
             } else if (index % 3 === 2) {
                 // Code block content
@@ -380,7 +414,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 const codeElement = document.createElement("pre");
                 const codeContent = document.createElement("code");
 
-                // Set the appropriate language class if language was detected
                 if (language) {
                     codeContent.classList.add(`language-${language}`);
                 }
@@ -388,10 +421,8 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeContent.textContent = part.trim();
                 codeElement.appendChild(codeContent);
 
-                // Initialize Highlight.js for the code block
                 hljs.highlightElement(codeContent);
 
-                // Create copy button for the code block
                 const codeCopyButton = document.createElement("span");
                 codeCopyButton.classList.add("material-symbols-rounded", "code-copy-button");
                 codeCopyButton.textContent = "content_copy";
@@ -412,7 +443,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             }
         });
 
-        // Handle the loading state if necessary
+        // Handle loading or add copy button for entire AI message
         if (isLoading) {
             const loadingDots = document.createElement("div");
             loadingDots.classList.add("loading-dots");
@@ -429,7 +460,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
             messageBody.appendChild(copyButtonContainer);
 
-            // Copy the entire message
             copyButton.addEventListener("click", () => {
                 navigator.clipboard.writeText(entireMessage).then(() => {
                     copyButton.textContent = "done";
@@ -440,11 +470,11 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             });
         }
 
-        // Add AI icon and message content to the final element
         messageContent.appendChild(aiIcon);
         messageContent.appendChild(messageBody);
+
     } else if (sender === "You") {
-        // User message handling with image support
+        // User message
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
@@ -470,14 +500,15 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     chatBox.appendChild(messageElement);
     chatBox.scrollTop = chatBox.scrollHeight;
 
-    // Render MathJax dynamically
-    if (window.MathJax && MathJax.typeset) {
-        MathJax.typeset();
+    // Dynamically typeset MathJax for the newly added message element
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([messageElement])
+            .catch(err => console.error("MathJax rendering failed:", err));
     } else {
-        console.error("MathJax is not loaded or does not support typeset.");
+        console.error("MathJax is not loaded or does not support typesetPromise.");
     }
 
-    return messageElement; // Return the element for further manipulation
+    return messageElement;
 }
 
 function generateChatId() {
@@ -616,12 +647,17 @@ function toggleSidebar() {
     const chatWindow = document.querySelector('.chat-window');
     const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
+    const inputContainer = document.querySelector('.input-container');
 
     if (sidebar.classList.contains('collapsed')) {
+        // Sidebar is currently collapsed, so let's expand it
         sidebar.classList.remove('collapsed');
         chatBox.classList.remove('collapsed');
         collapseBtn.textContent = 'left_panel_close';
         chatWindow.classList.remove('collapsed');
+        inputContainer.classList.remove('collapsed');
+
+        document.body.classList.remove('no-chat-scroll'); // Remove class when expanded
 
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
@@ -629,10 +665,14 @@ function toggleSidebar() {
         tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
     } else {
+        // Sidebar is currently expanded, so let's collapse it
         sidebar.classList.add('collapsed');
-        chatBox.classList.add('collapsed'); // Add 'collapsed' to chat-box
+        chatBox.classList.add('collapsed');
         collapseBtn.textContent = 'left_panel_open';
         chatWindow.classList.add('collapsed');
+        inputContainer.classList.add('collapsed');
+
+        document.body.classList.add('no-chat-scroll'); // Add class when collapsed
 
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
@@ -847,71 +887,73 @@ function streamParsedResponse(messageContent, rawResponseText) {
 }
 
 function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
-    // Clear the existing content
+    const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
+
+    function processTextWithMarkdownAndMath(text) {
+        const mathSegments = [];
+        let placeholderIndex = 0;
+
+        const textWithPlaceholders = text.replace(mathPattern, (match) => {
+            mathSegments.push(match);
+            return `%%%MATH${placeholderIndex++}%%%`;
+        });
+
+        const parsedHTML = marked.parse(textWithPlaceholders);
+
+        let finalHTML = parsedHTML;
+        mathSegments.forEach((segment, i) => {
+            finalHTML = finalHTML.replace(`%%%MATH${i}%%%`, segment);
+        });
+
+        return finalHTML;
+    }
+
     messageBody.innerHTML = '';
+    let entireMessage = '';
 
-    let entireMessage = ''; // To store the entire message
-
-    // Use regex to split the content into normal text, code blocks, and MathJax
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
     const parts = rawResponseText.split(codeBlockRegex);
 
-    parts.forEach((part, index) => {
-        if (index % 3 === 0) {
-            // Regular text or MathJax content
+    for (let i = 0; i < parts.length; i++) {
+        if (i % 3 === 0) {
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
+            const finalHTML = processTextWithMarkdownAndMath(parts[i].trim());
+            messageText.innerHTML = finalHTML;
 
-            // Detect MathJax syntax
-            if (/\$\$[\s\S]*\$\$|\\\([\s\S]*\\\)/.test(part.trim())) {
-                // MathJax block
-                messageText.innerHTML = part.trim();
-            } else {
-                // Markdown-rendered regular text
-                const parsedText = marked.parse(part.trim());
-                messageText.innerHTML = parsedText;
-
-                // Add 'table' class to any tables for consistent styling
-                const tables = messageText.querySelectorAll('table');
-                tables.forEach(table => {
-                    table.classList.add('table');
-                });
-            }
+            const tables = messageText.querySelectorAll('table');
+            tables.forEach(table => table.classList.add('table'));
 
             messageBody.appendChild(messageText);
-            entireMessage += part.trim();
-        } else if (index % 3 === 1) {
-            // Capture language identifier (e.g., python, javascript)
-            var language = part.trim();
-        } else if (index % 3 === 2) {
-            // Code block part
+            entireMessage += parts[i].trim();
+
+        } else if (i % 3 === 1) {
+            var language = parts[i].trim();
+        } else if (i % 3 === 2) {
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
             const codeElement = document.createElement('pre');
             const codeContent = document.createElement('code');
 
-            // Set the appropriate language class if language was detected
             if (language) {
                 codeContent.classList.add(`language-${language}`);
             }
 
-            codeContent.textContent = part.trim();
+            codeContent.textContent = parts[i].trim();
             codeElement.appendChild(codeContent);
 
-            // Initialize Highlight.js for the code block
             hljs.highlightElement(codeContent);
 
-            // Create copy button for the code block
             const codeCopyButton = document.createElement('span');
             codeCopyButton.classList.add('material-symbols-rounded', 'code-copy-button');
-            codeCopyButton.textContent = "content_copy";
+            codeCopyButton.textContent = 'content_copy';
 
             codeCopyButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(part.trim()).then(() => {
+                navigator.clipboard.writeText(parts[i].trim()).then(() => {
                     codeCopyButton.textContent = 'done';
                     setTimeout(() => {
-                        codeCopyButton.textContent = "content_copy";
+                        codeCopyButton.textContent = 'content_copy';
                     }, 2000);
                 });
             });
@@ -919,11 +961,10 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeBlock.appendChild(codeElement);
             codeBlock.appendChild(codeCopyButton);
             messageBody.appendChild(codeBlock);
-            entireMessage += `\n\n${part.trim()}`;
+            entireMessage += `\n\n${parts[i].trim()}`;
         }
-    });
+    }
 
-    // Add copy button for the entire AI message
     const copyButtonContainer = document.createElement('div');
     copyButtonContainer.classList.add('copy-button-container');
 
@@ -934,7 +975,6 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
 
     messageBody.appendChild(copyButtonContainer);
 
-    // Copy the entire message
     copyButton.addEventListener('click', () => {
         navigator.clipboard.writeText(entireMessage).then(() => {
             copyButton.textContent = 'done';
@@ -944,11 +984,11 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         });
     });
 
-    // Render MathJax content dynamically
-    if (window.MathJax && MathJax.typeset) {
-        MathJax.typeset();
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([messageBody])
+            .catch(err => console.error("MathJax rendering failed:", err));
     } else {
-        console.error('MathJax is not loaded or does not support typeset.');
+        console.error("MathJax is not loaded or does not support typesetPromise.");
     }
 }
 
@@ -1248,6 +1288,15 @@ async function handleDrop(e) {
     }
 }
 
+// Add event listeners for chat-title validation
+document.addEventListener("DOMContentLoaded", () => {
+    const chatTitleElements = document.querySelectorAll('.chat-title'); // Select all elements with the class 'chat-title'
+    chatTitleElements.forEach(chatTitle => {
+        chatTitle.addEventListener('input', () => validateChatTitle(chatTitle)); // Validate on input
+    });
+});
+
+
 function deleteChat(chatId) {
     fetch(`/chats/${chatId}`, {
         method: 'DELETE',
@@ -1287,6 +1336,7 @@ window.onload = async () => {
 
         const data = await response.json();
         sessionStorage.setItem('userId', data.userId);
+        sessionStorage.setItem('userName', data.userName);
 
         chatId = sessionStorage.getItem('chatId') || generateChatId();
         sessionStorage.setItem('chatId', chatId);
@@ -1298,3 +1348,12 @@ window.onload = async () => {
         window.location.href = '/login'; // Redirect to login on error
     }
 };
+
+// Update the showWelcomeScreen function:
+function showWelcomeScreen() {
+    const welcomeContainer = document.getElementById('welcome-container');
+    const userName = sessionStorage.getItem('userName') || 'User';
+    welcomeContainer.style.display = 'block'; // Show the welcome screen
+    const welcomeMessage = welcomeContainer.querySelector('p');
+    welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
+}
