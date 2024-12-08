@@ -1,3 +1,7 @@
+/* =======================================
+   RESET & BASE STYLES
+======================================= */
+
 /* Reset CSS */
 * {
     margin: 0;
@@ -5,13 +9,103 @@
     box-sizing: border-box;
 }
 
+/* =======================================
+   CSS VARIABLES
+   Update these once to affect all usage
+======================================= */
+
+:root {
+    /* Colors */
+    --color-primary: #005DE8;
+    --color-secondary: #909095;
+    --color-tertiary: #c0c0c0;
+    --color-bg: #f0f0f0;
+    --color-text: #2b2b2b;
+    --color-light: #ffffff;
+    --color-accent: #646468;
+    --color-ai-msg-bg: #eff0f1;
+    --color-user-msg-bg: #005DE8;
+    --color-sidebar-bg: #F7F8F9;
+    --color-icon-default: #CBCCCF;
+    --color-popup-bg: #bb3b3b;
+    --color-drag-border: #999;
+
+    /* Fonts */
+    --font-family-main: 'Open Sans', sans-serif;
+    --font-family-heading: 'Merriweather', serif;
+    --font-family-monospace: 'Courier New', monospace;
+
+    /* Sizes */
+    --sidebar-width: 250px;
+    --scrollbar-width: 8px;
+    --border-radius: 8px;
+    --input-padding: 10px;
+    --icon-size: 36px;
+    --font-size-base: 12px;
+    --transition-duration: 0.3s;
+
+    /* Z-Indices */
+    --z-sidebar: 1;
+    --z-icons: 3;
+    --z-popup: 1000;
+}
+
+/* =======================================
+   TYPOGRAPHY & BASE ELEMENTS
+======================================= */
+
+html, body {
+    font-family: var(--font-family-main);
+    font-size: var(--font-size-base);
+    color: var(--color-text);
+}
+
+ul {
+    padding-left: 0;
+    margin-left: 0;
+    list-style-type: none;
+}
+
+/* =======================================
+   SCROLLBAR STYLING
+   Reusable scrollbar styles
+======================================= */
+
+::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--color-tertiary);
+    border-radius: 4px;
+}
+
+/* =======================================
+   LAYOUT CLASSES & CONTAINERS
+======================================= */
+
 .container {
     display: flex;
     height: 100vh;
-    
 }
 
 body.no-chat-scroll {
+    overflow-y: auto;
+}
+
+body.no-chat-scroll #chat-box,
+body.no-chat-scroll .chat-window {
+    overflow: visible;
+}
+
+/* =======================================
+   CHAT WINDOW & CHAT BOX
+======================================= */
+=======
     overflow-y: auto; /* Enable scrolling on the body */
 }
 
@@ -49,15 +143,7 @@ body.no-chat-scroll .chat-window {
 .chat-window.collapsed {
     max-width: calc(60vw);
     margin: 0 auto;
-    transition: margin 0.3s ease;
-}
-
-@media (max-width: 1100px) {
-    .chat-window.collapsed {
-        max-width: calc(60vw);
-        margin: 0px 0px 0px auto;
-        transition: margin 0.3s ease;
-    }
+    transition: margin var(--transition-duration) ease;
 }
 
 #chat-box {
@@ -68,39 +154,57 @@ body.no-chat-scroll .chat-window {
     padding-right: 10px;
 }
 
-#chat-box::-webkit-scrollbar {
-    width: 8px;
-}
-
-#chat-box::-webkit-scrollbar-track {
-    background: #f0f0f0;
-}
-
-#chat-box::-webkit-scrollbar-thumb {
-    background-color: #c0c0c0;
-    border-radius: 4px;
-}
-
-#chat-input {
-    width: 100%;
-    background-color: #f0f0f0;
-    border: none;
-    resize: none;
-    outline: none;
-    font-family: open sans;
-    font-size: 12px;
+.chat-item {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    font-family: var(--font-family-main);
+    font-size: var(--font-size-base);
     line-height: 1.4;
-    height: 20px;
-    overflow: hidden;
-    transition: height 0.2s ease; /* Smooth height transition */
+    font-weight: 400;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: var(--border-radius);
 }
+
+.chat-item:hover {
+    background-color: var(--color-ai-msg-bg);
+}
+
+.chat-item:focus {
+    outline: 2px solid var(--color-primary);
+    background-color: var(--color-ai-msg-bg);
+}
+
+.chat-item .bin-icon-button {
+    display: none;
+}
+
+.chat-item:hover .bin-icon-button,
+.chat-item:focus-within .bin-icon-button {
+    display: inline-block;
+    color: #888;
+    cursor: pointer;
+    border: none;
+    margin-left: 8px;
+    margin-top: 3px;
+}
+
+.bin-icon-button:focus {
+    outline: 2px solid var(--color-primary);
+    border: none;
+}
+
+/* =======================================
+   INPUT AREA
+======================================= */
 
 .input-container {
     display: flex;
     align-items: center;
     border-radius: 50px;
-    background-color: #f0f0f0;
-    padding: 10px;
+    background-color: var(--color-bg);
+    padding: var(--input-padding);
     position: relative;
     bottom: 0;
     width: 100%;
@@ -121,34 +225,32 @@ body.no-chat-scroll .chat-window {
     color: #909095 !important;
 }
 
-.chat-item .bin-icon-button {
-    display: none;
+.input-container.collapsed {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background-color: var(--color-bg);
 }
 
-/* Display the bin icon when hovering over the chat item */
-.chat-item:hover .bin-icon-button {
-    display: inline-block;
-    color: #888;
+#chat-input {
+    width: 100%;
+    background-color: var(--color-bg);
+    border: none;
+    resize: none;
+    outline: none;
+    font-family: var(--font-family-main);
+    font-size: var(--font-size-base);
+    line-height: 1.4;
+    height: 20px;
+    overflow: hidden;
+    transition: height 0.2s ease;
+}
+
+.attach-icon {
     cursor: pointer;
-    border: none;
-    margin-left: 8px;
-    margin-top: 3px;
-}
-
-/* Display the bin icon when the chat item or any of its descendants have focus */
-.chat-item:focus-within .bin-icon-button {
-    display: inline-block;
-    color: #888;
-    cursor: pointer;
-    border: none;
-    margin-left: 8px;
-    margin-top: 3px;
-}
-
-/* Ensure the bin icon is focusable and styled when focused */
-.bin-icon-button:focus {
-    outline: 2px solid #005DE8;
-    border: none;
+    font-size: 24px;
+    margin-right: 10px;
+    color: var(--color-secondary) !important;
 }
 
 #send-btn {
@@ -156,19 +258,26 @@ body.no-chat-scroll .chat-window {
     padding: 10px;
     cursor: pointer;
     font-size: 24px;
-    color: #909095 !important;
+    color: var(--color-secondary) !important;
     border: none;
 }
 
+#send-btn.active {
+    color: var(--color-primary) !important;
+}
+
+/* =======================================
+   SIDEBAR
+======================================= */
+
 .sidebar {
-    width: 250px;
-    background-color: #F7F8F9;
-    transition: width 0.3s ease;
+    width: var(--sidebar-width);
+    background-color: var(--color-sidebar-bg);
+    transition: width var(--transition-duration) ease;
     position: relative;
-    z-index: 1;
+    z-index: var(--z-sidebar);
     padding-top: 50px;
     overflow-y: auto;
-    
 }
 
 .sidebar.collapsed {
@@ -176,20 +285,9 @@ body.no-chat-scroll .chat-window {
     overflow: hidden;
 }
 
-/* Optional scrollbar styling for WebKit browsers */
-.sidebar::-webkit-scrollbar {
-    width: 8px;
-}
-
-.sidebar::-webkit-scrollbar-track {
-    background: #f0f0f0;
-}
-
-.sidebar::-webkit-scrollbar-thumb {
-    background-color: #c0c0c0;
-    border-radius: 4px;
-}
-
+/* =======================================
+   ICON CONTAINER & ICONS
+======================================= */
 
 .icon-container {
     display: flex;
@@ -198,20 +296,23 @@ body.no-chat-scroll .chat-window {
     position: fixed;
     top: 10px;
     left: 10px;
-    z-index: 3;
+    z-index: var(--z-icons);
 }
 
-.collapse-icon, .new-chat-icon, .attach-icon, .tutor-mode-icon {
+.collapse-icon,
+.new-chat-icon,
+.attach-icon,
+.tutor-mode-icon {
     cursor: pointer;
-    font-size: 36px;
+    font-size: var(--icon-size);
     margin-right: 10px;
-    color: #CBCCCF;
+    color: var(--color-icon-default);
     background-color: transparent;
     border: 0;
 }
 
 .icon-container.active {
-    background-color: #F7F8F9;
+    background-color: var(--color-sidebar-bg);
     width: 200px;
     transition-delay: 150ms;
 }
@@ -219,86 +320,51 @@ body.no-chat-scroll .chat-window {
 .collapse-icon.active,
 .new-chat-icon.active,
 .tutor-mode-icon.active {
-    color: #909095;
+    color: var(--color-secondary);
 }
 
 .send-icon {
     cursor: pointer;
-    font-size: 36px;
+    font-size: var(--icon-size);
     margin-left: 10px;
-    color: #CBCCCF;
+    color: var(--color-icon-default);
 }
 
-#send-btn.active {
-    color: #005DE8 !important;
-}
+/* =======================================
+   LISTS & CHAT CATEGORY
+======================================= */
 
 .no-bullets {
     list-style-type: none;
     padding: 20px;
     margin: 0;
-    font-family: merriweather ;
+    font-family: var(--font-family-heading);
     font-weight: 600;
-    font-size: 12px;
+    font-size: var(--font-size-base);
     line-height: 1.4;
-    color: #2b2b2b;
+    color: var(--color-text);
     margin-bottom: 10px;
     margin-top: 10px;
 }
 
-.chat-category-list{
+.chat-category-list {
     margin-top: 10px;
     margin-bottom: 5px;
-    
-}
-ul {
-    padding-left: 0;
-    margin-left: 0;
-}
-
-.chat-item {
-    display: flex;
-    align-items: start;
-    justify-content: space-between; 
-    margin-bottom: 0px;
-    font-family: open sans;
-    font-size: 12px;
-    line-height: 1.4;
-    font-weight: 400;
-    cursor: pointer;
-    padding: 10px;
-    border-radius: 8px;
-    list-style-type: none;
-    margin-left: 0;
-}
-
-.hidden-chat {
-    display: none;
-}
-
-
-.chat-item:hover {
-    background-color: #eff0f1;
-}
-
-.chat-item:focus {
-    outline: 2px solid #005DE8; /* Adjust color to match your theme */
-    background-color: #eff0f1; /* Optional: change background on focus */
 }
 
 ul.chat-category-list {
     padding-left: 0;
 }
 
+/* =======================================
+   MESSAGES
+======================================= */
+
 .message {
     display: flex;
     align-items: center;
     margin-bottom: 0px;
-    color: #2b2b2b;
-}
-
-.user .message-content .message-body .message-text {
-    margin: 0;
+    color: var(--color-text);
 }
 
 .message.user {
@@ -307,11 +373,37 @@ ul.chat-category-list {
 
 .message.ai {
     justify-content: flex-start;
-   
 }
 
+.message-content {
+    max-width: 60%;
+    padding: 10px;
+    border-radius: var(--border-radius);
+    font-family: var(--font-family-main);
+    font-size: var(--font-size-base);
+    line-height: 1.6;
+}
+
+.message.user .message-content {
+    background-color: var(--color-user-msg-bg);
+    text-align: right;
+    color: var(--color-light);
+}
+
+.message.ai .message-content {
+    background-color: none;
+    display: flex;
+}
+
+.ai-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 10px;
+}
+
+.user .message-content .message-body .message-text,
 .ai .message-content .message-body .message-text {
-    margin-left: 5px;
+    margin: 0;
 }
 
 .ai .message-content .message-body .message-text ul {
@@ -322,34 +414,10 @@ ul.chat-category-list {
     margin: 20px 0px 0px 40px;
 }
 
-.message-content {
-    max-width: 60%;
-    padding: 10px;
-    border-radius: 8px;
-    font-family: open sans;
-    font-size: 12px;
-    line-height: 1.6;
-}
+/* =======================================
+   LOADING DOTS (ANIMATION)
+======================================= */
 
-.message.user .message-content {
-    background-color: #005DE8;
-    text-align: right;
-    color: #ffffff;
-}
-
-.message.ai .message-content {
-    background-color: none;
-    display: flex;
-    
-}
-
-.ai-icon {
-    width: 24px;
-    height: 24px;
-    margin-right: 10px;
-}
-
-/* Loading dots animation */
 .loading-dots {
     margin-top: 10px;
     display: inline-block;
@@ -364,7 +432,7 @@ ul.chat-category-list {
     position: absolute;
     width: 8px;
     height: 8px;
-    background: #005DE8;
+    background: var(--color-primary);
     border-radius: 50%;
     animation: loading-dots 1.2s infinite ease-in-out;
 }
@@ -393,96 +461,102 @@ ul.chat-category-list {
     }
 }
 
-/* Formatting */
-  .table {
+/* =======================================
+   TABLE FORMATTING
+======================================= */
+
+.table {
     border-collapse: collapse;
     font-family: Arial, sans-serif;
     border-color: #909090;
     margin: 15px 0px;
-  }
+}
 
-  .table thead {
+.table thead {
     background-color: #240F6E;
-    color: white;
-  }
+    color: var(--color-light);
+}
 
-  .table th, .table td {
+.table th,
+.table td {
     padding: 10px;
     text-align: center;
-  }
+}
 
-  .table td {
+.table td {
     border: 1px solid #ddd;
-  }
+}
 
-  .table th {
+.table th {
     border-top: none;
-  }
+}
 
-  /* Zebra stripe effect for rows */
-  .table tbody tr:nth-child(even) {
+.table tbody tr:nth-child(even) {
     background-color: #f9f9f9;
-  }
+}
 
-  .table tbody tr:hover {
+.table tbody tr:hover {
     background-color: #f1f1f1;
-  }
+}
 
-  /* Optional: Bottom border for header */
-  .table thead th {
+.table thead th {
     border-bottom: 2px solid #ddd;
-  }
+}
 
-  .display-formula {
+/* =======================================
+   FORMULAS
+======================================= */
+
+.display-formula {
     text-align: center;
     font-family: 'Times New Roman', serif;
     font-size: 1.5em;
-    color: white;
-    background-color: black;
+    color: var(--color-light);
+    background-color: #000;
     padding: 10px;
-    border-radius: 8px;
+    border-radius: var(--border-radius);
     display: inline-block;
-  }
-  
-  .inline-formula {
+}
+
+.inline-formula {
     font-family: 'Times New Roman', serif;
     font-size: 1em;
-    color: black;
-  }
+    color: #000;
+}
 
-/* Styling for the container of file uploads */
+/* =======================================
+   FILE UPLOAD STYLING
+======================================= */
+
 .file-upload-container {
     display: flex;
     justify-content: flex-end;
     align-items: center;
     background-color: transparent;
     padding: 10px;
-    border-radius: 8px;
+    border-radius: var(--border-radius);
     margin-bottom: 10px;
 }
 
 .file-upload-container .message-content {
-    background-color: #ffffff;
-    color: #2b2b2b;
+    background-color: var(--color-light);
+    color: var(--color-text);
     padding: 10px;
     max-width: 60%;
     text-align: right;
     display: flex;
     align-items: center;
-
 }
 
-/* Styling for the file link in the chat */
 .file-link {
-    font-family: open sans;
-    font-size: 12px;
+    font-family: var(--font-family-main);
+    font-size: var(--font-size-base);
     line-height: 1.4;
-    color: #005DE8;
+    color: var(--color-primary);
     text-decoration: underline;
     margin-right: 10px;
 }
 
-/* Styling for the delete button next to the file link */
 .delete-button {
     cursor: pointer;
     font-size: 18px;
@@ -494,66 +568,58 @@ ul.chat-category-list {
     color: #ff4d4d;
 }
 
-/* Code block container styling */
+/* =======================================
+   CODE BLOCKS
+======================================= */
+
 .code-block-container {
     position: relative;
     background-color: #0d0d0d;
     padding: 10px;
     margin: 10px 0;
-    border-radius: 8px;
+    border-radius: var(--border-radius);
     overflow: auto;
 }
 
-/* Code element styling */
 pre {
     margin: 0;
-    font-family: 'Courier New', monospace;
+    font-family: var(--font-family-monospace);
 }
 
 pre code.hljs {
     background-color: #0d0d0d;
 }
 
-.code-block-container .code-copy-button {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    cursor: pointer;
-}
-
-/* Code block itself */
 .code-block-container pre {
     margin: 0;
     padding-right: 30px;
 }
 
-/* Copy button inside the code block */
 .code-copy-button {
     position: absolute;
     top: 8px;
     right: 8px;
     cursor: pointer;
-    color: #888;
+    color: var(--color-light);
     font-size: 18px;
     transition: color 0.2s;
 }
 
-.code-copy-button:hover {
-    color: #005DE8; 
-}
-
+.code-copy-button:hover,
 .code-copy-button:active {
-    color: #005DE8;
+    color: var(--color-primary);
 }
 
-/* Entire message copy button container */
+/* =======================================
+   ENTIRE MESSAGE COPY
+======================================= */
+
 .copy-button-container {
     margin-top: 8px;
     display: flex;
     justify-content: flex-start;
 }
 
-/* Copy button for entire message */
 .copy-button {
     cursor: pointer;
     color: #888;
@@ -565,13 +631,14 @@ pre code.hljs {
     margin-left: 10px;
 }
 
-.copy-button:hover {
-    color: #005DE8;
+.copy-button:hover,
+.copy-button:active {
+    color: var(--color-primary);
 }
 
-.copy-button:active {
-    color: #005DE8;
-}
+/* =======================================
+   WELCOME CONTAINER
+======================================= */
 
 .welcome-container {
     text-align: center;
@@ -587,49 +654,26 @@ pre code.hljs {
 }
 
 .welcome-container h1 {
-    font-family: merriweather;
+    font-family: var(--font-family-heading);
     font-size: 36px;
     font-weight: 700;
     margin-bottom: 10px;
 }
 
 .welcome-container p {
-    font-family: open sans;
-    font-size: 12px;
+    font-family: var(--font-family-main);
+    font-size: var(--font-size-base);
     color: #666;
 }
 
-@media (max-width: 768px) {
-    .welcome-container h1 {
-        font-size: 22px;
-    }
-
-
-    .welcome-image {
-        width: 100%;
-        
-        
-    }
-}
-
-@media (max-width: 480px) {
-    .welcome-container h1 {
-        font-size: 18px;
-    }
-
-
-    .welcome-image {
-        width: 100%;
-        
-    }
-}
-
-
+/* =======================================
+   DROPDOWN (TUTOR MODE)
+======================================= */
 
 #tutor-mode-dropdown {
     display: none;
     position: absolute;
-    background-color: #ffffff;
+    background-color: var(--color-light);
     min-width: 100px;
     box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.2);
     z-index: 1;
@@ -641,18 +685,16 @@ pre code.hljs {
 }
 
 #tutor-mode-dropdown .dropdown-item {
-    color: #646468;
-    background-color: #ffffff;
+    color: var(--color-accent);
+    background-color: var(--color-light);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--border-radius);
     min-width: 80px;
     padding: 5px;
     text-align: left;
-    font-family: open sans;
+    font-family: var(--font-family-main);
     font-weight: 600;
-    font-size: 12px;
-    text-decoration: none;
-    display: block;
+    font-size: var(--font-size-base);
     cursor: pointer;
     margin: 8px;
 }
@@ -661,35 +703,28 @@ pre code.hljs {
     background-color: #F4F5F7;
 }
 
-/* Hide the checkmark by default */
 .checkmark {
     display: none;
     margin-left: 10px;
     color: #006FBF;
 }
 
-/* Show the checkmark for the active item */
 .active .checkmark {
     color: #006FBF;
     display: inline;
     background-color: #F4F5F7;
 }
 
-.code-block-container .code-copy-button {
-    color: #fff;
-}
-
-.code-block-container .code-copy-button:hover {
-    color: #005DE8; 
-}
-
-/* Styling for code blocks */
-.hljs-keyword {
-    color: #2e95d3 !important;
-}
+/* =======================================
+   SYNTAX HIGHLIGHTING (HLJS)
+======================================= */
 
 .hljs {
     color: #fff !important;
+}
+
+.hljs-keyword {
+    color: #2e95d3 !important;
 }
 
 .hljs-string {
@@ -698,13 +733,11 @@ pre code.hljs {
 
 .hljs-title {
     color: #f22c3d !important;
-} 
-
-.hljs-number {
-    color: #df3079 !important;
 }
 
-.hljs-attr {
+.hljs-number,
+.hljs-attr,
+.hljs-variable {
     color: #df3079 !important;
 }
 
@@ -712,20 +745,13 @@ pre code.hljs {
     color: #ffffff80 !important;
 }
 
-.hljs-tag {
-    color: #fff !important;
-}
-
+.hljs-tag,
 .hljs-name {
     color: #fff !important;
 }
 
 .hljs-attribute {
     color: #00a67d !important;
-}
-
-.hljs-variable {
-    color: #df3079 !important;
 }
 
 .hljs-symbol {
@@ -736,68 +762,74 @@ pre code.hljs {
     color: #e9950c !important;
 }
 
-/* Accessible */
+/* =======================================
+   ACCESSIBILITY & HIGH CONTRAST
+======================================= */
+
 :focus {
-    outline: 2px solid #005DE8; /* High-contrast focus indicator */
+    outline: 2px solid var(--color-primary);
 }
 
-/* Ensure that the focus indicator is visible */
-button:focus, 
-input:focus, 
+button:focus,
+input:focus,
 textarea:focus {
-    outline: 2px solid #005DE8;
+    outline: 2px solid var(--color-primary);
     outline-offset: 2px;
 }
 
-/* High Contrast Mode Support */
 @media (prefers-contrast: high) {
     body {
-        background-color: #ffffff;
+        background-color: var(--color-light);
         color: #000000;
     }
-    
-    /* Adjust colors to ensure sufficient contrast */
+
     .message.user .message-content {
-        background-color: #005DE8;
-        color: #ffffff;
+        background-color: var(--color-primary);
+        color: var(--color-light);
     }
 
     .message.ai .message-content {
-        background-color: #f0f0f0;
+        background-color: var(--color-bg);
         color: #000000;
     }
 }
 
+/* =======================================
+   DRAGOVER STATE
+======================================= */
+
 .input-container.dragover,
 .input-container.dragover * {
-    border: 2px dashed #999;
+    border: 2px dashed var(--color-drag-border);
     background-color: #f9f9f9;
 }
 
+/* =======================================
+   POPUP CONTAINER
+======================================= */
+
 .popup-container {
     position: absolute;
-    bottom: 100px; /* Adjust this value to position the popup above the input container */
+    bottom: 100px;
     left: 50%;
     transform: translateX(-50%);
-    background-color: #bb3b3b;
-    color: #fff;
+    background-color: var(--color-popup-bg);
+    color: var(--color-light);
     padding: 10px 15px;
     border-radius: 5px;
-    z-index: 1000;
+    z-index: var(--z-popup);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     max-width: 80%;
     word-wrap: break-word;
     animation: fadeIn 0.3s ease-in-out;
 }
 
-/* Popup Message */
 .popup-message {
     font-size: 16px;
     margin-right: 10px;
     display: inline-block;
 }
 
-/* Popup Close Button */
 .popup-close-button {
     cursor: pointer;
     font-size: 20px;
@@ -807,8 +839,39 @@ textarea:focus {
     display: inline-block;
 }
 
-/* Fade-in Animation */
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
+}
+
+/* =======================================
+   RESPONSIVE MEDIA QUERIES
+======================================= */
+
+@media (max-width: 1100px) {
+    .chat-window.collapsed {
+        max-width: calc(60vw);
+        margin: 0px 0px 0px auto;
+        transition: margin var(--transition-duration) ease;
+    }
+}
+
+@media (max-width: 768px) {
+    .welcome-container h1 {
+        font-size: 22px;
+    }
+
+    .welcome-image {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .welcome-container h1 {
+        font-size: 18px;
+    }
+
+    .welcome-image {
+        width: 100%;
+    }
 }

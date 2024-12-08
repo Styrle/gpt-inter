@@ -36,6 +36,7 @@
     "pdf-parse": "^1.1.1",
     "remove-markdown": "^0.5.5",
     "session": "^0.1.0",
+    "sharp": "^0.33.5",
     "tesseract.js": "^5.1.1",
     "textract": "^2.5.0",
     "xlsx": "^0.18.5"
