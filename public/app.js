@@ -1375,25 +1375,16 @@ function createImageModal() {
 
     // Add click event to close the modal
     closeBtn.addEventListener('click', () => {
-        const modalImage = document.getElementById('modal-image');
-        const currentSrc = modalImage.src;
-        modalImage.src = ''; // Clear the image source
-        if (currentSrc.startsWith('blob:')) {
-            URL.revokeObjectURL(currentSrc); // Revoke the object URL
-        }
         modal.style.display = 'none';
+        // We do NOT revokeObjectURL here because we may need to show the same image again.
+        // If you do need to revoke, do so only when the image will never be displayed again.
     });
 
     // Close modal when clicking outside the image
     modal.addEventListener('click', (event) => {
         if (event.target === modal) {
-            const modalImage = document.getElementById('modal-image');
-            const currentSrc = modalImage.src;
-            modalImage.src = ''; // Clear the image source
-            if (currentSrc.startsWith('blob:')) {
-                URL.revokeObjectURL(currentSrc); // Revoke the object URL
-            }
             modal.style.display = 'none';
+            // Same note as above about revokeObjectURL.
         }
     });
 
@@ -1413,4 +1404,5 @@ function showImageModal(imageUrl) {
     modalImage.src = imageUrl;
     modal.style.display = 'flex'; // Show the modal
 }
+
 

@@ -152,7 +152,7 @@ function ensureAuthenticated(req, res, next) {
         // In development, simulate authentication
         req.user = {
             email: 'JSerpis@delta.kaplaninc.com',
-            name: 'Test User',
+            name: 'Josh Serpis',
             userRoles: ['authenticated'],
         };
         return next();
@@ -169,7 +169,7 @@ if (isDevelopment) {
         } else {
             req.user = {
                 email: 'JSerpis@delta.kaplaninc.com',
-                name: 'Test User',
+                name: 'Josh Serpis',
                 userRoles: ['authenticated'],
             };
             req.session.user = req.user;
@@ -643,7 +643,7 @@ setInterval(deleteOldChats, 24 * 60 * 60 * 1000);
 // ========================================
 if (isDevelopment) {
     app.get('/login', (req, res) => {
-        req.user = { userId: 'test-user-id', userDetails: 'Test User', userRoles: ['authenticated'] };
+        req.user = { userId: 'test-user-id', userDetails: 'Josh Serpis', userRoles: ['authenticated'] };
         res.redirect('/');
     });
 
