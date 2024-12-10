@@ -40,5 +40,6 @@
     "tesseract.js": "^5.1.1",
     "textract": "^2.5.0",
     "xlsx": "^0.18.5"
-  }
+  },
+  "devDependencies": {}
 }

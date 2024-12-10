@@ -37,6 +37,8 @@ inputContainer.addEventListener('dragover', handleDragOver, false);
 inputContainer.addEventListener('dragleave', handleDragLeave, false);
 inputContainer.addEventListener('drop', handleDrop, false);
 
+let selectedImageFiles = [];
+
 // Function to update the checkmark based on the selected mode
 function updateCheckmark() {
     dropdownItems.forEach(item => {
@@ -485,13 +487,13 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             messageBody.appendChild(messageText);
         }
 
-        if (imageFile) {
-            const imageElement = document.createElement("img");
-            imageElement.src = URL.createObjectURL(imageFile);
-            imageElement.alt = "Uploaded Image";
-            imageElement.classList.add("uploaded-image");
-            messageBody.appendChild(imageElement);
-        }
+        // if (imageFile) {
+        //     const imageElement = document.createElement("img");
+        //     imageElement.src = URL.createObjectURL(imageFile);
+        //     imageElement.alt = "Uploaded Image";
+        //     imageElement.classList.add("uploaded-image");
+        //     messageBody.appendChild(imageElement);
+        // }
 
         messageContent.appendChild(messageBody);
     }
@@ -530,11 +532,14 @@ fileUpload.addEventListener('change', async function () {
     if (files.length > 0) {
         for (const file of files) {
             if (file.type.startsWith('image/')) {
-                // It's an image, store it for sending with the next message
-                selectedImageFile = file;
+                // It's an image, add it to the selectedImageFiles array
+                selectedImageFiles.push(file);
 
-                // Optionally, display the selected file in the chat
-                appendFileLink(file.name);
+                // Generate a blob URL for the image
+                const imageUrl = URL.createObjectURL(file);
+
+                // Display the image link in the chat
+                appendFileLink(file.name, imageUrl);
 
                 // Change the attach icon to 'done'
                 attachIcon.textContent = "done"; 
@@ -570,34 +575,33 @@ fileUpload.addEventListener('change', async function () {
                         // Inform the user that the file was uploaded
                         appendMessage('System', `File "${file.name}" uploaded successfully.`);
 
-                        // Optionally, display the file name in the chat
-                        appendFileLink(file.name);
+                        const responseData = await response.json();
+                        const fileUrl = responseData.url || '#'; 
+                        appendFileLink(file.name, fileUrl);
                     } else {
                         const errorData = await response.json();
-                            console.error('Upload error:', errorData.error);
-                            appendMessage('System', `Error uploading file: ${errorData.error}`);
+                        console.error('Upload error:', errorData.error);
+                        appendMessage('System', `Error uploading file: ${errorData.error}`);
 
-                            // Display the popup if the error is about unsupported file type
-                            if (errorData.error.includes('Unsupported file type')) {
-                                const fileExtension = getFileExtension(file.name);
-                                displayPopup(`Document type .${fileExtension} not supported`);
-                            } else {
-                                displayPopup(`Error uploading file: ${errorData.error}`);
-                            }
+                        if (errorData.error.includes('Unsupported file type')) {
+                            const fileExtension = getFileExtension(file.name);
+                            displayPopup(`Document type .${fileExtension} not supported`);
+                        } else {
+                            displayPopup(`Error uploading file: ${errorData.error}`);
                         }
+                    }
                 } catch (error) {
                     console.error('Error uploading file:', error);
                     appendMessage('System', 'An error occurred while uploading the file.');
                 } finally {
-                    // Ensure that fileUpload is reset after processing
                     setTimeout(() => {
-                        fileUpload.value = '';  // Reset the file input, but with a delay to ensure upload completes
-                    }, 100);  // Small delay to ensure the input reset doesn't cause interference
+                        fileUpload.value = '';  
+                    }, 100);  
                 }
             }
         }
     }
-    fileUploadInProgress = false;  // Clear the upload flag
+    fileUploadInProgress = false;  
 });
 
 function appendFileLink(fileName, fileUrl) {
@@ -605,25 +609,40 @@ function appendFileLink(fileName, fileUrl) {
     
     // Create a container for the file link
     const fileElement = document.createElement('div');
-    fileElement.classList.add('file-upload-container', 'user'); // Add 'user' class to align it with user messages
+    fileElement.classList.add('file-upload-container', 'user'); // Align with user messages
     
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content'); // Apply message content styling
 
     // File link element
     const fileLink = document.createElement('a');
-    fileLink.href = fileUrl;
+    fileLink.href = fileUrl || '#'; // Use '#' if fileUrl is not provided
     fileLink.textContent = fileName;
-    fileLink.target = '_blank'; // Open in a new tab
     fileLink.classList.add('file-link'); // Optional class for styling
-    
+
+    // Determine if the file is an image based on its extension
+    const isImage = /\.(jpeg|jpg|gif|png|bmp|svg)$/i.test(fileName);
+
+    if (isImage && fileUrl) {
+        // It's an image, attach event listener to open in modal
+        fileLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            showImageModal(fileUrl);
+        });
+        fileLink.style.cursor = 'pointer'; // Indicate that it's clickable
+    } else if (fileUrl) {
+        // For non-image files, keep the default behavior
+        fileLink.target = '_blank'; // Open in a new tab
+    }
+
     messageContent.appendChild(fileLink);
     
     // Create delete button
     const deleteButton = document.createElement('span');
     deleteButton.classList.add('material-symbols-rounded', 'delete-button');
     deleteButton.textContent = 'delete';
-    
+    deleteButton.title = 'Delete this file message';
+
     // Add click event to delete the file message
     deleteButton.addEventListener('click', () => {
         chatBox.removeChild(fileElement); // Remove the file message from the chat
@@ -746,50 +765,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
 sendBtn.addEventListener('click', async () => {
     const message = chatInput.value.trim();
-    if (message || selectedImageFile) {
-        // Log current tutor mode before sending the message
+    if (message || selectedImageFiles.length > 0) {
         console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
 
-        // Hide the welcome screen if it's the first interaction
         if (isFirstInteraction) {
             hideWelcomeScreen();
-            isFirstInteraction = false; // Mark that the first interaction is done
+            isFirstInteraction = false;
         }
 
-        // Append the user's message to the chat, including the image if any
-        appendMessage('You', message, selectedImageFile);
+        // Append user's message (no single selectedImageFile here, it's handled by selectedImageFiles array)
+        appendMessage('You', message);
 
-        chatInput.value = ''; // Clear the input value
-        sendBtn.classList.remove('active'); // Reset button state
+        chatInput.value = '';
+        sendBtn.classList.remove('active');
 
-        // Append an empty message with loading dots for AI response
         const loadingMessageElement = appendMessage('AI', '', null, true);
 
         try {
             let response;
-            if (selectedImageFile) {
-                // Use sendMessageWithImage if an image is selected
-                response = await sendMessageWithImage(message, selectedImageFile);
-                selectedImageFile = null; // Reset the selected image after sending
+            if (selectedImageFiles.length > 0) {
+                response = await sendMessageWithImage(message, selectedImageFiles);
             } else {
-                // Use sendMessage if no image is selected
                 response = await sendMessage(message);
             }
 
-            if (response) {
-                streamParsedResponse(messageContent, response);
-            } else {
+            if (!response) {
                 console.error('Response is undefined.');
+                return;
             }
 
             const messageContent = loadingMessageElement.querySelector('.message-content');
-
-            // Stream the raw AI response text
             streamParsedResponse(messageContent, response);
 
-            // Update the chat history sidebar
             loadChatHistory();
-
         } catch (error) {
             console.error('Error sending message:', error);
         }
@@ -1050,11 +1058,11 @@ chatInput.addEventListener('input', () => {
 
 chatInput.addEventListener('keydown', async (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault(); // Prevent adding a new line
+        event.preventDefault();
 
         const message = chatInput.value.trim();
 
-        if (message || selectedImageFile) {
+        if (message || selectedImageFiles.length > 0) {
             console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
 
             if (isFirstInteraction) {
@@ -1062,39 +1070,32 @@ chatInput.addEventListener('keydown', async (event) => {
                 isFirstInteraction = false;
             }
 
-            // Append the user's message to the chat
-            appendMessage('You', message || '');
+            appendMessage('You', message);
 
             chatInput.value = '';
             sendBtn.classList.remove('active');
 
-            // Reset input height
             setTimeout(() => {
                 resetInputHeight();
             }, 0);
 
-            // Append an empty message with loading dots for AI
             const loadingMessageElement = appendMessage('AI', '', null, true);
 
             try {
                 let response;
-                if (selectedImageFile) {
-                    response = await sendMessageWithImage(message, selectedImageFile);
-                    selectedImageFile = null;
+                if (selectedImageFiles.length > 0) {
+                    response = await sendMessageWithImage(message, selectedImageFiles);
                 } else {
                     response = await sendMessage(message);
                 }
 
-                const messageContent = loadingMessageElement.querySelector('.message-content');
-
-                // **Removed the code that was removing loading dots here**
-
-                // Stream the AI response
-                streamParsedResponse(messageContent, response);
-
-                // Update the chat history sidebar
-                loadChatHistory();
-
+                if (response) {
+                    const messageContent = loadingMessageElement.querySelector('.message-content');
+                    streamParsedResponse(messageContent, response);
+                    loadChatHistory();
+                } else {
+                    console.error('Response is undefined.');
+                }
             } catch (error) {
                 console.error('Error sending message:', error);
             }
@@ -1135,25 +1136,25 @@ function formatBytes(bytes, decimals = 2) {
 }
 
 // Function to handle sending message with optional image
-async function sendMessageWithImage(message, imageFile) {
+async function sendMessageWithImage(message, imageFiles) {
     const formData = new FormData();
     formData.append('message', message);
     formData.append('chatId', chatId);
     formData.append('tutorMode', isTutorModeOn);
 
-    if (imageFile) {
-        formData.append('image', imageFile);
+    // Append all selected images
+    for (const img of imageFiles) {
+        formData.append('image', img);
     }
 
     try {
         const res = await fetch('/chat', {
-            method: 'POST', // Include the HTTP method
-            body: formData, // Include the form data in the body
+            method: 'POST',
+            body: formData,
             credentials: 'include',
             headers: {
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
-                // Note: Do not set 'Content-Type' header when sending FormData
             },
         });
 
@@ -1167,18 +1168,12 @@ async function sendMessageWithImage(message, imageFile) {
         }
 
         const data = await res.json();
-
-        // Access total_image_count and total_image_size
-        console.log('Total Images:', data.total_image_count);
-        console.log('Total Image Size:', data.total_image_size);
-
-        // Optionally, update the UI with this information
         updateImageStats(data.total_image_count, data.total_image_size);
 
         return data.response;
     } catch (error) {
-        console.error('Error sending message with image:', error);
-        throw error; // Optionally re-throw the error to be caught by the caller
+        console.error('Error sending message with images:', error);
+        throw error;
     }
 }
 
@@ -1226,16 +1221,19 @@ async function handleDrop(e) {
 
         for (const file of files) {
             if (file.type.startsWith('image/')) {
-                // It's an image, store it for sending with the next message
-                selectedImageFile = file;
+                // It's an image, add it to the selectedImageFiles array
+                selectedImageFiles.push(file);
 
-                // Optionally, display the selected file in the chat
-                appendFileLink(file.name);
+                // Generate a blob URL for the image
+                const imageUrl = URL.createObjectURL(file);
+
+                // Display the image link in the chat
+                appendFileLink(file.name, imageUrl);
 
                 // Change the attach icon to 'done'
                 attachIcon.textContent = "done"; 
 
-                // Revert back to attach icon after 2 seconds
+                // Revert after 2 seconds
                 setTimeout(() => {
                     attachIcon.textContent = "attach_file";
                 }, 2000);
@@ -1252,39 +1250,35 @@ async function handleDrop(e) {
                     });
 
                     if (response.ok) {
-                        // Change the attach icon to 'done'
                         attachIcon.textContent = "done"; 
-                        
-                        // Revert back to attach icon after 2 seconds
                         setTimeout(() => {
                             attachIcon.textContent = "attach_file";
                         }, 2000);
 
-                        // Inform the user that the file was uploaded
                         appendMessage('System', `File "${file.name}" uploaded successfully.`);
 
-                        // Optionally, display the file name in the chat afw
-                        appendFileLink(file.name);
+                        const responseData = await response.json();
+                        const fileUrl = responseData.url || '#';
+                        appendFileLink(file.name, fileUrl);
                     } else {
                         const errorData = await response.json();
-                            console.error('Upload error:', errorData.error);
-                            appendMessage('System', `Error uploading file: ${errorData.error}`);
+                        console.error('Upload error:', errorData.error);
+                        appendMessage('System', `Error uploading file: ${errorData.error}`);
 
-                            // Display the popup if the error is about unsupported file type
-                            if (errorData.error.includes('Unsupported file type')) {
-                                const fileExtension = getFileExtension(file.name);
-                                displayPopup(`Document type .${fileExtension} not supported`);
-                            } else {
-                                displayPopup(`Error uploading file: ${errorData.error}`);
-                            }
+                        if (errorData.error.includes('Unsupported file type')) {
+                            const fileExtension = getFileExtension(file.name);
+                            displayPopup(`Document type .${fileExtension} not supported`);
+                        } else {
+                            displayPopup(`Error uploading file: ${errorData.error}`);
                         }
+                    }
                 } catch (error) {
                     console.error('Error uploading file:', error);
                     appendMessage('System', 'An error occurred while uploading the file.');
                 }
             }
         }
-        fileUploadInProgress = false;  // Clear the upload flag
+        fileUploadInProgress = false;  
     }
 }
 
@@ -1357,3 +1351,58 @@ function showWelcomeScreen() {
     const welcomeMessage = welcomeContainer.querySelector('p');
     welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
 }
+
+// === Modal Functions ===
+function createImageModal() {
+    // Check if the modal already exists
+    let modal = document.getElementById('image-modal');
+    if (modal) return modal;
+
+    // Create modal elements
+    modal = document.createElement('div');
+    modal.id = 'image-modal';
+
+    const modalContent = document.createElement('div');
+    modalContent.classList.add('modal-content');
+
+    const img = document.createElement('img');
+    img.id = 'modal-image';
+    img.alt = 'Image Preview';
+
+    const closeBtn = document.createElement('span');
+    closeBtn.classList.add('close-btn');
+    closeBtn.innerHTML = '&times;'; // Unicode multiplication sign
+
+    // Add click event to close the modal
+    closeBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+        // We do NOT revokeObjectURL here because we may need to show the same image again.
+        // If you do need to revoke, do so only when the image will never be displayed again.
+    });
+
+    // Close modal when clicking outside the image
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+            // Same note as above about revokeObjectURL.
+        }
+    });
+
+    // Assemble modal content
+    modalContent.appendChild(closeBtn);
+    modalContent.appendChild(img);
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    return modal;
+}
+
+// Function to display the modal with the specified image URL
+function showImageModal(imageUrl) {
+    const modal = createImageModal();
+    const modalImage = document.getElementById('modal-image');
+    modalImage.src = imageUrl;
+    modal.style.display = 'flex'; // Show the modal
+}
+
+
