@@ -342,220 +342,201 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
  * Chat Endpoint
  * Interacts with OpenAI and returns AI responses
  */
-app.post('/chat', upload.single('image'), ensureAuthenticated, async (req, res) => {
-    const { message, tutorMode } = req.body;
-    const file = req.file;
+app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) => {
+    const { message, tutorMode, chatId: providedChatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    let { chatId } = req.body;
+    let chatId = providedChatId;
     if (!chatId) {
         const randomNumber = Math.random().toString(36).substr(2, 9);
         chatId = `${userId}_chat_${randomNumber}`;
     }
 
-    if (!message && !file) {
-        return res.status(400).json({ error: 'Missing message or file' });
+    // If no message and no images, return error
+    if (!message && (!req.files || req.files.length === 0)) {
+        return res.status(400).json({ error: 'Missing message or files' });
     }
 
-    try {
-        console.log(`Received message: "${message}" Tutor Mode: ${tutorMode ? 'ON' : 'OFF'} chatId: ${chatId}`);
-        let chat = await getChatHistory(chatId);
-        const isNewChat = !chat;
+    let chat = await getChatHistory(chatId);
+    const isNewChat = !chat;
 
-        if (!chat) {
-            chat = {
-                id: chatId,
-                title: 'New Chat',
-                visibility: 1,
-                messages: [],
-                timestamp: new Date().toISOString(),
-                total_tokens_used: 0,
-                total_interactions: 0,
-                average_tokens_per_interaction: 0,
-                total_image_count: 0,
-                total_image_size: 0,
-                total_document_count: 0,
-                total_document_size: 0,
-            };
-        }
-
-        // Ensure numeric fields
-        if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
-        if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
-
-        // Prepare conversation history
-        let messages = chat.messages.slice(-20).map(msg => ({
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp,
-            tokens: msg.tokens
-        }));
-
-        // System role message
-        const systemMessage = {
-            role: 'system',
-            content: tutorMode
-                ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-                : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
+    if (!chat) {
+        chat = {
+            id: chatId,
+            title: 'New Chat',
+            visibility: 1,
+            messages: [],
             timestamp: new Date().toISOString(),
+            total_tokens_used: 0,
+            total_interactions: 0,
+            average_tokens_per_interaction: 0,
+            total_image_count: 0,
+            total_image_size: 0,
+            total_document_count: 0,
+            total_document_size: 0,
         };
-        messages.unshift(systemMessage);
+    }
 
-        // Add user message if provided (not an image message)
-        if (message && (!file || !file.mimetype.startsWith('image/'))) {
-            messages.push({
-                role: 'user',
-                content: message,
-                timestamp: new Date().toISOString(),
-            });
+    // Ensure numeric fields
+    if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+    if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
+
+    // Prepare last 20 messages for context
+    let messages = chat.messages.slice(-20).map(msg => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        tokens: msg.tokens
+    }));
+
+    // Add system message with or without Tutor Mode
+    const systemMessage = {
+        role: 'system',
+        content: tutorMode
+            ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
+            : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
+        timestamp: new Date().toISOString(),
+    };
+    messages.unshift(systemMessage);
+
+    // Build user content array with text and images
+    let userContentArray = [];
+    if (message) {
+        userContentArray.push({ type: 'text', text: message });
+    }
+
+    // Process multiple images
+    if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+            if (file.mimetype.startsWith('image/')) {
+                const base64Image = file.buffer.toString('base64');
+                const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
+
+                // Add the image to the user message content
+                userContentArray.push({ type: "image_url", image_url: { url: imageUrl } });
+
+                // Update image stats
+                if (typeof chat.total_image_count !== 'number') chat.total_image_count = 0;
+                if (typeof chat.total_image_size !== 'number') chat.total_image_size = 0;
+
+                chat.total_image_count += 1;
+                chat.total_image_size += file.size || 0;
+            }
         }
+    }
 
-        // Handle image upload if provided
-        if (file && file.mimetype.startsWith('image/')) {
-            const base64Image = file.buffer.toString('base64');
-            const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
+    // If we have at least text or images, create a user message
+    if (userContentArray.length > 0) {
+        messages.push({
+            role: 'user',
+            content: userContentArray,
+            timestamp: new Date().toISOString(),
+        });
 
-            messages.push({
-                role: 'user',
-                content: [
-                    { "type": "text", "text": message || 'Please analyze the following image and remeber it throughout the chat:' },
-                    { "type": "image_url", "image_url": { "url": imageUrl } },
-                ],
-                timestamp: new Date().toISOString(),
-            });
+        // Also store in chat history (just store the text or "Sent images")
+        chat.messages.push({
+            role: 'user',
+            content: message || 'Sent images',
+            timestamp: new Date().toISOString(),
+            tokens: 0,
+        });
+    }
 
-            if (typeof chat.total_image_count !== 'number') chat.total_image_count = 0;
-            if (typeof chat.total_image_size !== 'number') chat.total_image_size = 0;
+    // Include document content if available
+    if (chat.documentContent) {
+        messages.push({
+            role: 'user',
+            content: `Here is the document content:\n${chat.documentContent}`,
+            timestamp: new Date().toISOString(),
+        });
+    }
 
-            chat.total_image_count += 1;
-            chat.total_image_size += file.size || 0;
+    // Call OpenAI
+    const payload = {
+        model: 'gpt-4o',
+        messages: messages,
+    };
 
-            chat.messages.push({
-                role: 'user',
-                content: message || 'Sent an image',
-                timestamp: new Date().toISOString(),
-                tokens: 0,
-                imageSize: file.size || 0,
-            });
-        }
+    const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'api-key': process.env.AZURE_OPENAI_API_KEY,
+        },
+        body: JSON.stringify(payload),
+    });
 
-        // Include document content if available
-        if (chat.documentContent) {
-            messages.push({
-                role: 'user',
-                content: `Here is the document content:\n${chat.documentContent}`,
-                timestamp: new Date().toISOString(),
-            });
-        }
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error from OpenAI API:', errorText);
+        return res.status(500).json({ error: `OpenAI request failed: ${response.statusText}` });
+    }
 
-        // Prepare request payload for OpenAI
-        const payload = {
-            model: 'gpt-4o',
-            messages: messages,
-        };
+    const data = await response.json();
+    const aiResponse = data.choices[0].message.content;
+    const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
 
-        const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+    console.log('AI Response:', aiResponse);
+    console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
+
+    // Store assistant response in chat
+    chat.messages.push({
+        role: 'assistant',
+        content: aiResponse,
+        timestamp: new Date().toISOString(),
+        tokens: completion_tokens,
+    });
+
+    // Update stats
+    chat.total_tokens_used += total_tokens;
+    chat.total_interactions += 2;
+    chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
+    chat.timestamp = new Date().toISOString();
+
+    // Generate a title for a new chat
+    if (isNewChat) {
+        const titlePrompt = [
+            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
+            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
+        ];
+
+        const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
+
+        const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'api-key': process.env.AZURE_OPENAI_API_KEY,
             },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(titlePayload),
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Error from OpenAI API:', errorText);
-            throw new Error(`Error: ${response.statusText}`);
+        if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            const generatedTitle = titleData.choices[0].message.content.trim();
+            chat.title = generatedTitle;
+        } else {
+            const errorText = await titleResponse.text();
+            console.error('Error generating title:', errorText);
         }
-
-        const data = await response.json();
-        const aiResponse = data.choices[0].message.content;
-        const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
-
-        console.log('AI Response:', aiResponse);
-        console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
-
-        // Append new user message to chat history
-        if (message && (!file || !file.mimetype.startsWith('image/'))) {
-            chat.messages.push({
-                role: 'user',
-                content: message,
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens,
-            });
-        }
-
-        if (file && file.mimetype.startsWith('image/')) {
-            chat.messages.push({
-                role: 'user',
-                content: message || 'Sent an image',
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens,
-            });
-        }
-
-        // Add assistant message
-        chat.messages.push({
-            role: 'assistant',
-            content: aiResponse,
-            timestamp: new Date().toISOString(),
-            tokens: completion_tokens,
-        });
-
-        // Update chat stats
-        chat.total_tokens_used += total_tokens;
-        chat.total_interactions += 2;
-        chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
-        chat.timestamp = new Date().toISOString();
-
-        // Generate title if new chat
-        if (isNewChat) {
-            const titlePrompt = [
-                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
-                { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
-            ];
-
-            const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
-
-            const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'api-key': process.env.AZURE_OPENAI_API_KEY,
-                },
-                body: JSON.stringify(titlePayload),
-            });
-
-            if (titleResponse.ok) {
-                const titleData = await titleResponse.json();
-                const generatedTitle = titleData.choices[0].message.content.trim();
-                chat.title = generatedTitle;
-            } else {
-                const errorText = await titleResponse.text();
-                console.error('Error generating title:', errorText);
-            }
-        }
-
-        await upsertChatHistory(chat);
-        const category = categorizeChat(chat.timestamp);
-
-        res.json({ 
-            response: aiResponse, 
-            chatId, 
-            category, 
-            tokens: total_tokens, 
-            average_tokens_per_interaction: chat.average_tokens_per_interaction,
-            total_image_count: chat.total_image_count,
-            total_image_size: chat.total_image_size,
-            total_document_count: chat.total_document_count,
-            total_document_size: chat.total_document_size,
-        });
-    } catch (error) {
-        console.error('Error processing chat request:', error);
-        res.status(500).json({ error: 'Something went wrong with OpenAI' });
     }
+
+    await upsertChatHistory(chat);
+    const category = categorizeChat(chat.timestamp);
+
+    res.json({
+        response: aiResponse,
+        chatId,
+        category,
+        tokens: total_tokens,
+        average_tokens_per_interaction: chat.average_tokens_per_interaction,
+        total_image_count: chat.total_image_count,
+        total_image_size: chat.total_image_size,
+        total_document_count: chat.total_document_count,
+        total_document_size: chat.total_document_size,
+    });
 });
+
 
 /**
  * Retrieve all chats for the authenticated user, categorized by date
