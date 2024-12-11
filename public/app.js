@@ -39,6 +39,30 @@ inputContainer.addEventListener('drop', handleDrop, false);
 
 let selectedImageFiles = [];
 
+function isSupportedImageType(file) {
+    const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/svg+xml', 'image/tiff', 'image/heic'];
+    return allowedImageTypes.includes(file.type.toLowerCase());
+}
+
+function handleFirstTab(e) {
+    if (e.key === 'Tab') {
+        document.body.classList.add('user-is-tabbing');
+        window.removeEventListener('keydown', handleFirstTab);
+        window.addEventListener('mousedown', handleMouseDownOnce);
+    }
+}
+
+// This function listens for the first mouse click after a Tab press.
+// When a mouse is used, we remove the 'user-is-tabbing' class.
+function handleMouseDownOnce() {
+    document.body.classList.remove('user-is-tabbing');
+    window.removeEventListener('mousedown', handleMouseDownOnce);
+    window.addEventListener('keydown', handleFirstTab);
+}
+
+// Add initial event listeners on page load
+window.addEventListener('keydown', handleFirstTab);
+
 // Function to update the checkmark based on the selected mode
 function updateCheckmark() {
     dropdownItems.forEach(item => {
@@ -138,6 +162,7 @@ async function sendMessage(message) {
         if (response.status === 429) {
             const { retryAfter } = await response.json();
             displayRateLimitMessage(retryAfter);
+            // Return null to indicate we should not append the user's message
             return null;
         }
 
@@ -149,16 +174,44 @@ async function sendMessage(message) {
         return data.response;
     } catch (error) {
         console.error('Error sending message:', error);
+        return null;
     }
 }
 
 function displayRateLimitMessage(retryAfter) {
     const chatBox = document.getElementById('chat-box');
     const messageElement = document.createElement('div');
-    messageElement.classList.add('message', 'ai-message'); // Apply appropriate styling classes
-    messageElement.textContent = `KaplanGPT has hit its limit. Please wait ${retryAfter} seconds.`;
+    messageElement.classList.add('message', 'ai'); // Apply AI message styling (assuming 'ai' or 'ai-message' class)
+    
+    const messageContent = document.createElement('div');
+    messageContent.classList.add('message-content');
+
+    const aiIcon = document.createElement("img");
+    aiIcon.src = "images/K_logo.svg";
+    aiIcon.alt = "AI Icon";
+    aiIcon.classList.add("ai-icon");
+
+    const messageBody = document.createElement("div");
+    messageBody.classList.add("message-body");
+
+    const textElement = document.createElement('div');
+    textElement.classList.add('message-text');
+    textElement.textContent = `Sorry, the rate limit has been hit and will come online in ${retryAfter} seconds.`;
+    messageBody.appendChild(textElement);
+
+    messageContent.appendChild(aiIcon);
+    messageContent.appendChild(messageBody);
+    messageElement.appendChild(messageContent);
+
     chatBox.appendChild(messageElement);
     chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Automatically remove the message after 'retryAfter' seconds
+    setTimeout(() => {
+        if (messageElement && messageElement.parentNode) {
+            messageElement.parentNode.removeChild(messageElement);
+        }
+    }, retryAfter * 100);
 }
 
 
@@ -532,7 +585,14 @@ fileUpload.addEventListener('change', async function () {
     if (files.length > 0) {
         for (const file of files) {
             if (file.type.startsWith('image/')) {
-                // It's an image, add it to the selectedImageFiles array
+                // Check if the image type is supported
+                if (!isSupportedImageType(file)) {
+                    const fileExtension = getFileExtension(file.name);
+                    displayPopup(`Image type .${fileExtension} not supported`);
+                    continue;
+                }
+
+                // It's a supported image, add it to the selectedImageFiles array
                 selectedImageFiles.push(file);
 
                 // Generate a blob URL for the image
@@ -542,7 +602,7 @@ fileUpload.addEventListener('change', async function () {
                 appendFileLink(file.name, imageUrl);
 
                 // Change the attach icon to 'done'
-                attachIcon.textContent = "done"; 
+                attachIcon.textContent = "done";
 
                 // Revert back to attach icon after 2 seconds
                 setTimeout(() => {
@@ -621,7 +681,7 @@ function appendFileLink(fileName, fileUrl) {
     fileLink.classList.add('file-link'); // Optional class for styling
 
     // Determine if the file is an image based on its extension
-    const isImage = /\.(jpeg|jpg|gif|png|bmp|svg)$/i.test(fileName);
+    const isImage = /\.(jpeg|jpg|gif|png|bmp|svg|tif|heic)$/i.test(fileName);
 
     if (isImage && fileUrl) {
         // It's an image, attach event listener to open in modal
@@ -675,6 +735,7 @@ function toggleSidebar() {
         collapseBtn.textContent = 'left_panel_close';
         chatWindow.classList.remove('collapsed');
         inputContainer.classList.remove('collapsed');
+        iconContainer.classList.remove('collapsed');
 
         document.body.classList.remove('no-chat-scroll'); // Remove class when expanded
 
@@ -690,6 +751,7 @@ function toggleSidebar() {
         collapseBtn.textContent = 'left_panel_open';
         chatWindow.classList.add('collapsed');
         inputContainer.classList.add('collapsed');
+        iconContainer.classList.add('collapsed');
 
         document.body.classList.add('no-chat-scroll'); // Add class when collapsed
 
@@ -773,36 +835,108 @@ sendBtn.addEventListener('click', async () => {
             isFirstInteraction = false;
         }
 
-        // Append user's message (no single selectedImageFile here, it's handled by selectedImageFiles array)
-        appendMessage('You', message);
+        // Append the user's message immediately
+        const userMessageElement = appendMessage('You', message);
+
+        // Show AI loading message immediately
+        const loadingMessageElement = appendMessage('AI', '', null, true);
 
         chatInput.value = '';
         sendBtn.classList.remove('active');
 
-        const loadingMessageElement = appendMessage('AI', '', null, true);
-
+        let response;
         try {
-            let response;
             if (selectedImageFiles.length > 0) {
                 response = await sendMessageWithImage(message, selectedImageFiles);
             } else {
                 response = await sendMessage(message);
             }
-
-            if (!response) {
-                console.error('Response is undefined.');
-                return;
-            }
-
-            const messageContent = loadingMessageElement.querySelector('.message-content');
-            streamParsedResponse(messageContent, response);
-
-            loadChatHistory();
         } catch (error) {
             console.error('Error sending message:', error);
         }
+
+        // If we hit a rate limit or there's no response (error)
+        if (response === null) {
+            // Remove the user's message and loading message
+            if (userMessageElement && userMessageElement.parentNode) {
+                userMessageElement.parentNode.removeChild(userMessageElement);
+            }
+            if (loadingMessageElement && loadingMessageElement.parentNode) {
+                loadingMessageElement.parentNode.removeChild(loadingMessageElement);
+            }
+            return;
+        }
+
+        // If we got a successful response, replace loading dots with streamed AI message
+        const messageContent = loadingMessageElement.querySelector('.message-content');
+        streamParsedResponse(messageContent, response);
+
+        loadChatHistory();
     }
 });
+
+chatInput.addEventListener('keydown', async (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+
+        const message = chatInput.value.trim();
+
+        if (message || selectedImageFiles.length > 0) {
+            console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
+
+            if (isFirstInteraction) {
+                hideWelcomeScreen();
+                isFirstInteraction = false;
+            }
+
+            // Append the user's message immediately
+            const userMessageElement = appendMessage('You', message);
+
+            // Show AI loading message immediately
+            const loadingMessageElement = appendMessage('AI', '', null, true);
+
+            chatInput.value = '';
+            sendBtn.classList.remove('active');
+
+            setTimeout(() => {
+                resetInputHeight();
+            }, 0);
+
+            let response;
+            try {
+                if (selectedImageFiles.length > 0) {
+                    response = await sendMessageWithImage(message, selectedImageFiles);
+                } else {
+                    response = await sendMessage(message);
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+            }
+
+            // If we hit a rate limit or there's no response
+            if (response === null) {
+                // Remove the user's message and loading message
+                if (userMessageElement && userMessageElement.parentNode) {
+                    userMessageElement.parentNode.removeChild(userMessageElement);
+                }
+                if (loadingMessageElement && loadingMessageElement.parentNode) {
+                    loadingMessageElement.parentNode.removeChild(loadingMessageElement);
+                }
+                return;
+            }
+
+            // If we got a successful response, handle AI message streaming
+            if (response) {
+                const messageContent = loadingMessageElement.querySelector('.message-content');
+                streamParsedResponse(messageContent, response);
+                loadChatHistory();
+            } else {
+                console.error('Response is undefined.');
+            }
+        }
+    }
+});
+
 
 sendBtn.addEventListener('keydown', function(event) {
     if (event.key === 'Tab' && !event.shiftKey) {
@@ -835,18 +969,19 @@ function streamMessageFromServer() {
 }
 
 function streamParsedResponse(messageContent, rawResponseText) {
-    const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
-    let currentWordIndex = 0;
-    let accumulatedText = ''; // To accumulate the words as they stream in
-    let lastRenderedWordIndex = 0; // Track the last index rendered for heavy tasks
-
-    // Ensure messageBody exists
+    // Remove any loading dots if present
     const messageBody = messageContent.querySelector('.message-body');
     if (!messageBody) {
         console.error("Message body not found.");
         return;
     }
 
+    const loadingDots = messageBody.querySelector('.loading-dots');
+    if (loadingDots) {
+        loadingDots.remove();
+    }
+
+    // Create or select a messageText element to display the streaming text
     let messageText = messageBody.querySelector('.message-text');
     if (!messageText) {
         messageText = document.createElement('div');
@@ -854,44 +989,50 @@ function streamParsedResponse(messageContent, rawResponseText) {
         messageBody.appendChild(messageText);
     }
 
-    // Remove loading dots once streaming starts
-    const loadingDots = messageBody.querySelector('.loading-dots');
-    if (loadingDots) {
-        loadingDots.remove();
-    }
+    // We'll stream the text as plain text first, then do a final parse at the end
+    messageText.textContent = ''; // Ensure empty at start of streaming
+
+    const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
+    let currentWordIndex = 0;
+    let accumulatedText = '';
+
+    const intervalSpeed = 10; // Faster interval for smoother streaming
+    const maxWordsPerChunk = 5; // Append a few words per iteration for even smoother streaming
 
     const wordInterval = setInterval(() => {
         if (currentWordIndex < words.length) {
-            accumulatedText += words[currentWordIndex];
-            currentWordIndex++;
-
-            // Update text frequently for real-time effect
-            messageText.innerHTML = marked.parse(accumulatedText);
-
-            // Perform heavy operations less frequently
-            if (currentWordIndex - lastRenderedWordIndex >= 20 || currentWordIndex === words.length) {
-                lastRenderedWordIndex = currentWordIndex;
-
-                // Re-render code blocks and MathJax less often
-                reRenderMessageWithCodeBlocks(messageBody, accumulatedText);
-
-                if (window.MathJax && MathJax.typesetPromise) {
-                    MathJax.typesetPromise().catch((err) => console.error("MathJax rendering failed:", err));
-                }
+            // Append a few words each iteration for smoother streaming
+            const chunkEnd = Math.min(currentWordIndex + maxWordsPerChunk, words.length);
+            for (let i = currentWordIndex; i < chunkEnd; i++) {
+                accumulatedText += words[i];
             }
+            currentWordIndex = chunkEnd;
 
+            // Update the textContent quickly (no markdown, just raw text now)
+            messageText.textContent = accumulatedText;
             chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
         } else {
             clearInterval(wordInterval);
 
-            // Final rendering after streaming completes
-            reRenderMessageWithCodeBlocks(messageBody, accumulatedText);
-
-            if (window.MathJax && MathJax.typesetPromise) {
-                MathJax.typesetPromise().catch((err) => console.error("MathJax rendering failed:", err));
-            }
+            // Streaming done, now we do the final parsing & formatting
+            finalizeResponseFormatting(messageBody, accumulatedText);
         }
-    }, 20); // Maintain the original speed
+    }, intervalSpeed);
+}
+
+function finalizeResponseFormatting(messageBody, rawResponseText) {
+    // Now parse markdown, handle code blocks, math, etc., all at once for smooth finalization
+    // Clear existing content
+    messageBody.innerHTML = '';
+
+    // Use the existing reRenderMessageWithCodeBlocks function but slightly adjust it
+    // to handle the final formatting in one go.
+    reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
+
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([messageBody]).catch((err) => console.error("MathJax rendering failed:", err));
+    }
+    chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
@@ -1070,7 +1211,8 @@ chatInput.addEventListener('keydown', async (event) => {
                 isFirstInteraction = false;
             }
 
-            appendMessage('You', message);
+            // Append the user's message immediately
+            const userMessageElement = appendMessage('You', message);
 
             chatInput.value = '';
             sendBtn.classList.remove('active');
@@ -1079,25 +1221,34 @@ chatInput.addEventListener('keydown', async (event) => {
                 resetInputHeight();
             }, 0);
 
-            const loadingMessageElement = appendMessage('AI', '', null, true);
-
+            let response;
             try {
-                let response;
                 if (selectedImageFiles.length > 0) {
                     response = await sendMessageWithImage(message, selectedImageFiles);
                 } else {
                     response = await sendMessage(message);
                 }
-
-                if (response) {
-                    const messageContent = loadingMessageElement.querySelector('.message-content');
-                    streamParsedResponse(messageContent, response);
-                    loadChatHistory();
-                } else {
-                    console.error('Response is undefined.');
-                }
             } catch (error) {
                 console.error('Error sending message:', error);
+            }
+
+            // If we hit a rate limit or there's no response
+            if (response === null) {
+                // Remove the user's message
+                if (userMessageElement && userMessageElement.parentNode) {
+                    userMessageElement.parentNode.removeChild(userMessageElement);
+                }
+                return;
+            }
+
+            // If we got a response, handle AI message
+            if (response) {
+                const loadingMessageElement = appendMessage('AI', '', null, true);
+                const messageContent = loadingMessageElement.querySelector('.message-content');
+                streamParsedResponse(messageContent, response);
+                loadChatHistory();
+            } else {
+                console.error('Response is undefined.');
             }
         }
     }
@@ -1191,9 +1342,12 @@ function appendFormula(formula) {
     MathJax.typesetPromise(); // Re-render MathJax equations
 }
 
+let dragCounter = 0;
+
 function handleDragEnter(e) {
     e.preventDefault();
     e.stopPropagation();
+    dragCounter++;
     inputContainer.classList.add('dragover');
 }
 
@@ -1206,12 +1360,17 @@ function handleDragOver(e) {
 function handleDragLeave(e) {
     e.preventDefault();
     e.stopPropagation();
-    inputContainer.classList.remove('dragover');
+    // Decrement the counter and only remove 'dragover' if it's zero
+    dragCounter--;
+    if (dragCounter === 0) {
+        inputContainer.classList.remove('dragover');
+    }
 }
 
 async function handleDrop(e) {
     e.preventDefault();
     e.stopPropagation();
+    dragCounter = 0; // Reset counter on drop
     inputContainer.classList.remove('dragover');
 
     const files = e.dataTransfer.files;
@@ -1221,7 +1380,14 @@ async function handleDrop(e) {
 
         for (const file of files) {
             if (file.type.startsWith('image/')) {
-                // It's an image, add it to the selectedImageFiles array
+                // Check if the image type is supported
+                if (!isSupportedImageType(file)) {
+                    const fileExtension = getFileExtension(file.name);
+                    displayPopup(`Image type .${fileExtension} not supported`);
+                    continue;
+                }
+
+                // It's a supported image, add it to the selectedImageFiles array
                 selectedImageFiles.push(file);
 
                 // Generate a blob URL for the image
@@ -1231,7 +1397,7 @@ async function handleDrop(e) {
                 appendFileLink(file.name, imageUrl);
 
                 // Change the attach icon to 'done'
-                attachIcon.textContent = "done"; 
+                attachIcon.textContent = "done";
 
                 // Revert after 2 seconds
                 setTimeout(() => {
