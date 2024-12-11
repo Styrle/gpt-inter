@@ -154,6 +154,10 @@ body.no-chat-scroll .chat-window {
     padding-right: 10px;
 }
 
+.chat-title {
+    font-size: 0.875rem;
+}
+
 .chat-item {
     display: flex;
     align-items: start;
@@ -168,11 +172,6 @@ body.no-chat-scroll .chat-window {
 }
 
 .chat-item:hover {
-    background-color: var(--color-ai-msg-bg);
-}
-
-.chat-item:focus {
-    outline: 2px solid var(--color-primary);
     background-color: var(--color-ai-msg-bg);
 }
 
@@ -227,9 +226,10 @@ body.no-chat-scroll .chat-window {
 
 .input-container.collapsed {
     position: sticky;
-    bottom: 0;
+    bottom: 1rem;
     z-index: 10;
     background-color: var(--color-bg);
+    padding: var(--input-padding);
 }
 
 #chat-input {
@@ -297,6 +297,7 @@ body.no-chat-scroll .chat-window {
     top: 10px;
     left: 10px;
     z-index: var(--z-icons);
+    transition: all var(--transition-duration) ease-in-out;
 }
 
 .collapse-icon,
@@ -378,6 +379,7 @@ ul.chat-category-list {
 .message-content {
     max-width: 60%;
     padding: 10px;
+    margin: 1.75rem;
     border-radius: var(--border-radius);
     font-family: var(--font-family-main);
     font-size: var(--font-size-base);
@@ -404,6 +406,7 @@ ul.chat-category-list {
 .user .message-content .message-body .message-text,
 .ai .message-content .message-body .message-text {
     margin: 0;
+    font-size: 1rem;
 }
 
 .ai .message-content .message-body .message-text ul {
@@ -411,7 +414,7 @@ ul.chat-category-list {
 }
 
 .ai .message-content .message-body .message-text ol {
-    margin: 20px 0px 0px 40px;
+    margin: 20px 40px;
 }
 
 /* =======================================
@@ -769,17 +772,11 @@ pre code.hljs {
 /* =======================================
    ACCESSIBILITY & HIGH CONTRAST
 ======================================= */
-
-:focus {
-    outline: 2px solid var(--color-primary);
-}
-
-button:focus,
-input:focus,
-textarea:focus {
+.user-is-tabbing :focus {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
 }
+
 
 @media (prefers-contrast: high) {
     body {
@@ -805,7 +802,7 @@ textarea:focus {
 .input-container.dragover,
 .input-container.dragover * {
     border: 2px dashed var(--color-drag-border);
-    background-color: #f9f9f9;
+    background-color: transparent !important;
 }
 
 /* =======================================
@@ -896,8 +893,7 @@ textarea:focus {
     transition: color 0.2s;
 }
 
-#image-modal .close-btn:hover,
-#image-modal .close-btn:focus {
+#image-modal .close-btn:hover {
     color: var(--color-primary);
     text-decoration: none;
     outline: none;
@@ -932,6 +928,20 @@ textarea:focus {
 
     .welcome-image {
         width: 100%;
+    }
+    
+    .icon-container.collapsed {
+        top: 0;
+        width: 100%;
+        left: 0;
+        justify-content: center;
+        background-color: var(--color-sidebar-bg);
+        transition: all var(--transition-duration) ease-in-out;
+    }
+    .chat-window.collapsed {
+        max-width: 100%;
+        margin: 0px 0px 0px auto;
+        transition: margin var(--transition-duration) ease;
     }
 }
 
