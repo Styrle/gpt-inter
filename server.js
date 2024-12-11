@@ -346,6 +346,11 @@ app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) =
     const { message, tutorMode, chatId: providedChatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
+    // Test condition: If user sends "test-rate-limit" message, respond with a 429 error
+    if (message === "test-rate-limit") {
+        return res.status(429).json({ retryAfter: 10 });
+    }
+
     let chatId = providedChatId;
     if (!chatId) {
         const randomNumber = Math.random().toString(36).substr(2, 9);
@@ -381,11 +386,11 @@ app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) =
     if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
     if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-    // Prepare last 20 messages for context
+    // Prepare last 20 messages for context, including timestamps in content
     let messages = chat.messages.slice(-20).map(msg => ({
         role: msg.role,
-        content: msg.content,
-        timestamp: msg.timestamp,
+        // Integrate the timestamp into the content so the model can see it
+        content: `[${msg.timestamp}] ${msg.content}`,
         tokens: msg.tokens
     }));
 
@@ -394,7 +399,7 @@ app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) =
         role: 'system',
         content: tutorMode
             ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-            : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
+            : "You are KaplanGPT, an assistant at Kaplan UK, a company providing apprenticeships and professional qualification in accounting & tax as well as data and IT. \n\nYour job is to help Kaplan staff members do their jobs. The staff work in the production and delivery of Kaplan's educational products. You may talk freely about topics that a user wants to discuss. You will be provided with data, documents and Kaplan's IP that you should converse freely about to the user.\n\nAs well as providing information about Kaplan, you will also assist with summarising; rewriting; checking spelling, grammar and tone of voice; helping to write materials; writing, checking and helping to refactor code; managing staff members; analysing documents and providing details contained within them; day-to-day admin tasks; as well as any other tasks that help staff at Kaplan perform their roles.\n\nIf a user provides you with a source of content and queries it, you must limit your answer to information contained within that content unless specifically asked otherwise.\n\nYou must not answer any questions on material produced by Tolley that a user adds as a prompt. If there is evidence to suggest the content you are provided with is produced by Tolley, you must let the user know you are not able to answer questions on Tolley material as requested by Tolley. You may answer general questions about Tolley as a business.\n\nYou have a friendly and professional manner and will always use British English. You must also use British as the default setting for other things such as when asked about law, regulations, standards or popular culture unless explicitly asked otherwise by the user. \n\n Remembers all previous interactions in this chat and can recall them when asked.",
         timestamp: new Date().toISOString(),
     };
     messages.unshift(systemMessage);
@@ -446,7 +451,7 @@ app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) =
     if (chat.documentContent) {
         messages.push({
             role: 'user',
-            content: `Here is the document content:\n${chat.documentContent}`,
+            content: `[${new Date().toISOString()}] Here is the document content:\n${chat.documentContent}`,
             timestamp: new Date().toISOString(),
         });
     }
