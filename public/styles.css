@@ -28,7 +28,7 @@
     --color-sidebar-bg: #F7F8F9;
     --color-icon-default: #CBCCCF;
     --color-popup-bg: #bb3b3b;
-    --color-drag-border: #999;
+    --color-drag-border: #0078D4;
 
     /* Fonts */
     --font-family-main: 'Open Sans', sans-serif;
@@ -296,7 +296,7 @@ body.no-chat-scroll .chat-window {
     position: fixed;
     top: 10px;
     left: 10px;
-    z-index: var(--z-icons);
+    z-index: var(--z-popup);
     transition: all var(--transition-duration) ease-in-out;
 }
 
@@ -929,19 +929,57 @@ pre code.hljs {
     .welcome-image {
         width: 100%;
     }
+
+    #chat-box {
+        padding-top: 20px;
+    }
     
     .icon-container.collapsed {
         top: 0;
         width: 100%;
         left: 0;
         justify-content: center;
-        background-color: var(--color-sidebar-bg);
+        background-color: var(--color-light);
         transition: all var(--transition-duration) ease-in-out;
     }
+
     .chat-window.collapsed {
         max-width: 100%;
         margin: 0px 0px 0px auto;
         transition: margin var(--transition-duration) ease;
+    }
+
+    .message-content {
+        max-width: 90%;
+        margin: 1.75rem 0;
+    }
+
+    .ai .message-content .message-body .message-text ul {
+        margin: 10px auto;
+    }
+    
+    .ai .message-content .message-body .message-text ol {
+        margin: 10px 20px;
+    }
+
+    /* Make sidebar overlay the chat on mobile */
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: var(--sidebar-width);
+        transform: translateX(-100%);
+        transition: transform var(--transition-duration) ease;
+        z-index: 5;
+    }
+
+    .sidebar:not(.collapsed) {
+        transform: translateX(0);
+    }
+
+    .chat-window {
+        margin-left: 0 !important;
     }
 }
 
