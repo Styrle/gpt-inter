@@ -744,7 +744,7 @@ function toggleSidebar() {
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        tutorModeButton.classList.add('active');
+        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
         inputBackground.classList.add('active');
     } else {
@@ -762,7 +762,7 @@ function toggleSidebar() {
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        tutorModeButton.classList.remove('active');
+        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -772,7 +772,7 @@ function initializeActiveState() {
     const collapseBtn = document.getElementById('collapse-btn');
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
-    const tutorModeButton = document.getElementById('tutor-mode-button');
+    //const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
 
     iconContainer.addEventListener('keydown', function(event) {
@@ -791,14 +791,14 @@ function initializeActiveState() {
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        tutorModeButton.classList.add('active');
+        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
     } else {
         // Sidebar is collapsed, remove 'active' class from icons and icon-container
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        tutorModeButton.classList.remove('active');
+        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -827,14 +827,6 @@ document.addEventListener('DOMContentLoaded', () => {
                }
            });
        });
-
-       const urlParams = new URLSearchParams(window.location.search);
-
-        if (urlParams.has('login') && urlParams.get('login') === 'success') {
-            console.log("Login detected. Refreshing the page...");
-            // Force a full page reload, bypassing cache
-            location.reload(true);
-        }
 });
 
 sendBtn.addEventListener('click', async () => {
@@ -1513,25 +1505,5 @@ function showImageModal(imageUrl) {
     modalImage.src = imageUrl;
     modal.style.display = 'flex'; // Show the modal
 }
-
-
-async function checkUserSession() {
-    try {
-        const response = await fetch('/session-secret');
-        const data = await response.json();
-
-        if (data.firstLogin) {
-            console.log("First login detected. Refreshing the page...");
-            location.reload(true); // Force a full page reload
-        } else {
-            console.log("User already recognized.");
-        }
-    } catch (error) {
-        console.error("Error checking session:", error);
-    }
-}
-
-// Call this function on page load
-document.addEventListener('DOMContentLoaded', checkUserSession);
 
 
