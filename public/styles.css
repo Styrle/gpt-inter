@@ -300,6 +300,20 @@ body.no-chat-scroll .chat-window {
     transition: all var(--transition-duration) ease-in-out;
 }
 
+.input-background {
+    display: none;
+}
+
+.input-background.collapsed {
+    display: block;
+    position: fixed;
+    width: 60%;
+    height: 90px;
+    bottom: 0;
+    background-color: var(--color-light);
+    z-index: 3;
+}
+
 .collapse-icon,
 .new-chat-icon,
 .attach-icon,
@@ -938,7 +952,6 @@ pre code.hljs {
         top: 0;
         width: 100%;
         left: 0;
-        justify-content: center;
         background-color: var(--color-light);
         transition: all var(--transition-duration) ease-in-out;
     }
