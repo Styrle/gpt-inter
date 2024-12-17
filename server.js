@@ -237,7 +237,12 @@ function categorizeChat(timestamp) {
 // ========================================
 
 app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
+    if (!req.session.hasLoggedIn) {
+        req.session.hasLoggedIn = true; // Mark as logged in
+        res.json({ secret: req.user ? req.user.displayName : 'Not authenticated', firstLogin: true });
+    } else {
+        res.json({ secret: req.user ? req.user.displayName : 'Not authenticated', firstLogin: false });
+    }
 });
 
 app.post('/upload', upload.single('file'), async (req, res) => {
@@ -633,6 +638,18 @@ async function deleteOldChats() {
 // Run old chat cleanup on startup and every 24 hours
 deleteOldChats();
 setInterval(deleteOldChats, 24 * 60 * 60 * 1000);
+
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+
+    // Perform authentication logic here
+    if (username === 'test' && password === 'password') { // Replace with your real logic
+        req.session.user = { email: username }; // Store user session
+        res.redirect('/?login=success'); // Redirect with a query param
+    } else {
+        res.status(401).json({ error: 'Invalid credentials' });
+    }
+});
 
 // Auth Routes
 if (isDevelopment) {
