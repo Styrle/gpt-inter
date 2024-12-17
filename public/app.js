@@ -727,6 +727,7 @@ function toggleSidebar() {
     const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
     const inputContainer = document.querySelector('.input-container');
+    const inputBackground = document.querySelector('.input-background');
 
     if (sidebar.classList.contains('collapsed')) {
         // Sidebar is currently collapsed, so let's expand it
@@ -736,6 +737,7 @@ function toggleSidebar() {
         chatWindow.classList.remove('collapsed');
         inputContainer.classList.remove('collapsed');
         iconContainer.classList.remove('collapsed');
+        inputBackground.classList.remove('collapsed');
 
         document.body.classList.remove('no-chat-scroll'); // Remove class when expanded
 
@@ -744,6 +746,7 @@ function toggleSidebar() {
         attachIcon.classList.add('active');
         tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
+        inputBackground.classList.add('active');
     } else {
         // Sidebar is currently expanded, so let's collapse it
         sidebar.classList.add('collapsed');
@@ -752,6 +755,7 @@ function toggleSidebar() {
         chatWindow.classList.add('collapsed');
         inputContainer.classList.add('collapsed');
         iconContainer.classList.add('collapsed');
+        inputBackground.classList.add('collapsed');
 
         document.body.classList.add('no-chat-scroll'); // Add class when collapsed
 
