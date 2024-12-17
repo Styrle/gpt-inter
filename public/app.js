@@ -827,6 +827,14 @@ document.addEventListener('DOMContentLoaded', () => {
                }
            });
        });
+
+       const urlParams = new URLSearchParams(window.location.search);
+
+        if (urlParams.has('login') && urlParams.get('login') === 'success') {
+            console.log("Login detected. Refreshing the page...");
+            // Force a full page reload, bypassing cache
+            location.reload(true);
+        }
 });
 
 sendBtn.addEventListener('click', async () => {
@@ -1505,5 +1513,25 @@ function showImageModal(imageUrl) {
     modalImage.src = imageUrl;
     modal.style.display = 'flex'; // Show the modal
 }
+
+
+async function checkUserSession() {
+    try {
+        const response = await fetch('/session-secret');
+        const data = await response.json();
+
+        if (data.firstLogin) {
+            console.log("First login detected. Refreshing the page...");
+            location.reload(true); // Force a full page reload
+        } else {
+            console.log("User already recognized.");
+        }
+    } catch (error) {
+        console.error("Error checking session:", error);
+    }
+}
+
+// Call this function on page load
+document.addEventListener('DOMContentLoaded', checkUserSession);
 
 
