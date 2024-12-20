@@ -350,6 +350,45 @@ function validateChatTitle(inputElement) {
     }
 }
 
+function createScrollTable(index, element) {
+    const root = element; // element is a DOM element, not a jQuery object
+    const icon = root.querySelector(".swipe-icon");
+    const table = root.querySelector(".table-responsive");
+    const accessibleMessage = root.querySelector(".accessible-message");
+
+    function setupAria(index, target) {
+        let label = "message-label-" + index;
+        target.setAttribute('id', label);
+        table.setAttribute('aria-labelledby', label);
+    }
+
+    function updateDOM() {
+        const hasScrollBar = table.scrollWidth > table.clientWidth;
+        const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+
+        if (hasScrollBar && isTouchDevice) {
+            icon.classList.remove("d-none");
+        } else {
+            icon.classList.add("d-none");
+        }
+    }
+
+    // Setup ARIA attributes initially
+    setupAria(index, accessibleMessage);
+
+    // Run updateDOM now
+    updateDOM();
+
+    // Listen for resize
+    window.addEventListener("resize", updateDOM);
+
+    // Return any methods or properties that need external access (optional)
+    return {
+        updateDOM,
+        setupAria
+    };
+}
+
 
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
@@ -441,26 +480,63 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
+        let language = ''; // Define language here so we can use it after the second part
+
         parts.forEach((part, index) => {
+            const safePart = (part || '').trim(); // Ensure safe trimming
+
             if (index % 3 === 0) {
                 // Regular text may contain markdown & math
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
-                const finalHTML = processTextWithMarkdownAndMath(part.trim());
+                const finalHTML = processTextWithMarkdownAndMath(safePart);
                 messageText.innerHTML = finalHTML;
 
-                // Add 'table' class to tables
+                // Add 'table' class to tables, then wrap them as requested
                 const tables = messageText.querySelectorAll('table');
-                tables.forEach(table => {
-                    table.classList.add('table');
+                tables.forEach((table, tIndex) => {
+                    // Add classes to the table
+                    table.classList.add('table', 'table-bordered');
+
+                    // Create the container element
+                    const tableContainer = document.createElement('div');
+                    tableContainer.classList.add('table-responsive-container');
+
+                    // Create the scrollable div
+                    const scrollableDiv = document.createElement('div');
+                    scrollableDiv.classList.add('table-responsive');
+                    scrollableDiv.setAttribute('tabindex', '0');
+                    scrollableDiv.setAttribute('role', 'region');
+
+                    // Create the accessible message (visually hidden)
+                    const accessibleMessage = document.createElement('span');
+                    accessibleMessage.classList.add('accessible-message', 'visually-hidden');
+                    accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+
+                    // Create the swipe icon div
+                    const swipeIcon = document.createElement('div');
+                    swipeIcon.classList.add('svg-icon', 'swipe-icon');
+                    swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+
+                    // Insert the new structure before moving the table
+                    const oldParent = table.parentNode;
+                    oldParent.insertBefore(tableContainer, table);
+
+                    // Now append the scrollable div and children to the container
+                    tableContainer.appendChild(scrollableDiv);
+                    tableContainer.appendChild(accessibleMessage);
+                    tableContainer.appendChild(swipeIcon);
+
+                    // Finally, move the table inside the scrollable div
+                    scrollableDiv.appendChild(table);
                 });
 
                 messageBody.appendChild(messageText);
-                entireMessage += part.trim();
+                entireMessage += safePart;
             } else if (index % 3 === 1) {
                 // Language for the code block
-                var language = part.trim();
+                language = safePart;
             } else if (index % 3 === 2) {
                 // Code block content
                 const codeBlock = document.createElement("div");
@@ -473,7 +549,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                     codeContent.classList.add(`language-${language}`);
                 }
 
-                codeContent.textContent = part.trim();
+                codeContent.textContent = safePart;
                 codeElement.appendChild(codeContent);
 
                 hljs.highlightElement(codeContent);
@@ -483,7 +559,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeCopyButton.textContent = "content_copy";
 
                 codeCopyButton.addEventListener("click", () => {
-                    navigator.clipboard.writeText(part.trim()).then(() => {
+                    navigator.clipboard.writeText(safePart).then(() => {
                         codeCopyButton.textContent = "done";
                         setTimeout(() => {
                             codeCopyButton.textContent = "content_copy";
@@ -494,7 +570,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeBlock.appendChild(codeElement);
                 codeBlock.appendChild(codeCopyButton);
                 messageBody.appendChild(codeBlock);
-                entireMessage += `\n\n${part.trim()}`;
+                entireMessage += `\n\n${safePart}`;
             }
         });
 
@@ -539,14 +615,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             messageText.textContent = message;
             messageBody.appendChild(messageText);
         }
-
-        // if (imageFile) {
-        //     const imageElement = document.createElement("img");
-        //     imageElement.src = URL.createObjectURL(imageFile);
-        //     imageElement.alt = "Uploaded Image";
-        //     imageElement.classList.add("uploaded-image");
-        //     messageBody.appendChild(imageElement);
-        // }
 
         messageContent.appendChild(messageBody);
     }
@@ -1025,19 +1093,58 @@ function streamParsedResponse(messageContent, rawResponseText) {
 }
 
 function finalizeResponseFormatting(messageBody, rawResponseText) {
-    // Now parse markdown, handle code blocks, math, etc., all at once for smooth finalization
+    // Now parse markdown, handle code blocks, math, etc.
     // Clear existing content
     messageBody.innerHTML = '';
 
-    // Use the existing reRenderMessageWithCodeBlocks function but slightly adjust it
-    // to handle the final formatting in one go.
     reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
 
+    // After re-rendering, wrap any tables found:
+    const tables = messageBody.querySelectorAll('table');
+    tables.forEach((table, tIndex) => {
+        // Add classes to the table
+        table.classList.add('table', 'table-bordered');
+
+        // Create the container element
+        const tableContainer = document.createElement('div');
+        tableContainer.classList.add('table-responsive-container');
+
+        // Create the scrollable div
+        const scrollableDiv = document.createElement('div');
+        scrollableDiv.classList.add('table-responsive');
+        scrollableDiv.setAttribute('tabindex', '0');
+        scrollableDiv.setAttribute('role', 'region');
+
+        // Create the accessible message (visually hidden)
+        const accessibleMessage = document.createElement('span');
+        accessibleMessage.classList.add('accessible-message', 'visually-hidden');
+        accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+
+        // Create the swipe icon div
+        const swipeIcon = document.createElement('div');
+        swipeIcon.classList.add('svg-icon', 'swipe-icon');
+        swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+
+        // Insert the new structure before moving the table
+        const oldParent = table.parentNode;
+        oldParent.insertBefore(tableContainer, table);
+
+        // Now append the scrollable div and children to the container
+        tableContainer.appendChild(scrollableDiv);
+        tableContainer.appendChild(accessibleMessage);
+        tableContainer.appendChild(swipeIcon);
+
+        // Finally, move the table inside the scrollable div
+        scrollableDiv.appendChild(table);
+    });
+
     if (window.MathJax && MathJax.typesetPromise) {
-        MathJax.typesetPromise([messageBody]).catch((err) => console.error("MathJax rendering failed:", err));
+        MathJax.typesetPromise([messageBody])
+            .catch(err => console.error("MathJax rendering failed:", err));
     }
     chatBox.scrollTop = chatBox.scrollHeight;
 }
+
 
 function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
@@ -1065,24 +1172,33 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     let entireMessage = '';
 
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
-    const parts = rawResponseText.split(codeBlockRegex);
+
+    // Split the response text safely
+    const parts = rawResponseText ? rawResponseText.split(codeBlockRegex) : [''];
 
     for (let i = 0; i < parts.length; i++) {
+        const currentPart = parts[i] || '';
+
         if (i % 3 === 0) {
+            // Regular text parts
+            const textToProcess = currentPart.trim();
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
-            const finalHTML = processTextWithMarkdownAndMath(parts[i].trim());
+            const finalHTML = processTextWithMarkdownAndMath(textToProcess);
             messageText.innerHTML = finalHTML;
 
             const tables = messageText.querySelectorAll('table');
             tables.forEach(table => table.classList.add('table'));
 
             messageBody.appendChild(messageText);
-            entireMessage += parts[i].trim();
+            entireMessage += textToProcess;
 
         } else if (i % 3 === 1) {
-            var language = parts[i].trim();
+            // Language for the code block
+            var language = currentPart ? currentPart.trim() : '';
         } else if (i % 3 === 2) {
+            // Code block content
+            const codeContentText = currentPart ? currentPart.trim() : '';
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
@@ -1093,7 +1209,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
                 codeContent.classList.add(`language-${language}`);
             }
 
-            codeContent.textContent = parts[i].trim();
+            codeContent.textContent = codeContentText;
             codeElement.appendChild(codeContent);
 
             hljs.highlightElement(codeContent);
@@ -1103,7 +1219,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeCopyButton.textContent = 'content_copy';
 
             codeCopyButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(parts[i].trim()).then(() => {
+                navigator.clipboard.writeText(codeContentText).then(() => {
                     codeCopyButton.textContent = 'done';
                     setTimeout(() => {
                         codeCopyButton.textContent = 'content_copy';
@@ -1114,7 +1230,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeBlock.appendChild(codeElement);
             codeBlock.appendChild(codeCopyButton);
             messageBody.appendChild(codeBlock);
-            entireMessage += `\n\n${parts[i].trim()}`;
+            entireMessage += `\n\n${codeContentText}`;
         }
     }
 
