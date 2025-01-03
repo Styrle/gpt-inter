@@ -539,7 +539,7 @@ ul.chat-category-list {
 
 .file-upload-container {
     display: flex;
-    justify-content: flex-end;
+    justify-content: flex-end; /* Keep messages to the right (for "user" style) */
     align-items: center;
     background-color: transparent;
     padding: 10px;
@@ -547,14 +547,18 @@ ul.chat-category-list {
     margin-bottom: 10px;
 }
 
+/* Important: make the .message-content display flex 
+   so the icon, file name, and delete button line up */
 .file-upload-container .message-content {
+    display: flex;
+    align-items: center;        
+    flex-direction: row;        
+    justify-content: flex-end;   
     background-color: var(--color-light);
     color: var(--color-text);
     padding: 10px;
     max-width: 60%;
-    text-align: right;
-    display: flex;
-    align-items: center;
+    border-radius: var(--border-radius);
 }
 
 .file-link {
@@ -562,15 +566,15 @@ ul.chat-category-list {
     font-size: var(--font-size-base);
     line-height: 1.4;
     color: var(--color-primary);
-    text-decoration: underline;
+    text-decoration: none;
     margin-right: 10px;
+    display: inline-flex;
+    align-items: center;        
+    gap: 0.5rem; 
 }
 
-.delete-button {
-    cursor: pointer;
-    font-size: 18px;
-    color: #b5b5b6;
-    margin-left: 10px;
+.file-name {
+    text-decoration: underline;
 }
 
 .delete-button:hover {
@@ -579,6 +583,19 @@ ul.chat-category-list {
 
 .uploaded-image {
     height: 50px;
+}
+
+.file-icon {
+    color: rgb(76, 175, 80);
+    text-decoration: none;
+}
+
+.delete-button {
+    cursor: pointer;
+    font-size: 18px;
+    color: #b5b5b6;
+    margin-left: 10px;
+    color: #ff4d4d;
 }
 
 /* =======================================
@@ -593,6 +610,16 @@ ul.chat-category-list {
     border-radius: var(--border-radius);
     overflow: auto;
 }
+
+.code-block-header {
+    background-color: #333;
+    color: #ffffff;
+    font-size: 0.85rem;
+    padding: 4px 8px;
+    border-radius: 4px 4px 0 0;
+    margin-bottom: 4px;
+    letter-spacing: 0.1rem;
+  }
 
 pre {
     margin: 0;
