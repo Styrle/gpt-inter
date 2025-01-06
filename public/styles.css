@@ -605,8 +605,8 @@ ul.chat-category-list {
 .code-block-container {
     position: relative;
     background-color: #0d0d0d;
-    padding: 10px;
     margin: 10px 0;
+    padding-bottom: 10px;
     border-radius: var(--border-radius);
     overflow: auto;
 }
@@ -615,10 +615,10 @@ ul.chat-category-list {
     background-color: #333;
     color: #ffffff;
     font-size: 0.85rem;
-    padding: 4px 8px;
+    padding: 8px;
     border-radius: 4px 4px 0 0;
     margin-bottom: 4px;
-    letter-spacing: 0.1rem;
+    letter-spacing: 0.05rem;
   }
 
 pre {
@@ -641,7 +641,7 @@ pre code.hljs {
     right: 8px;
     cursor: pointer;
     color: var(--color-light);
-    font-size: 18px;
+    font-size: 18px !important;
     transition: color 0.2s;
 }
 
@@ -845,10 +845,13 @@ pre code.hljs {
 
 .input-container.dragover,
 .input-container.dragover * {
-    border: 2px dashed var(--color-drag-border);
-    background-color: transparent !important;
+    border: 2px dashed #0078D4;
+    background-color: #f0f8ff !important;
 }
 
+.input-container.dragover .attach-icon {
+    border: none;
+}
 /* =======================================
    POPUP CONTAINER
 ======================================= */
