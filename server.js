@@ -1,7 +1,11 @@
+// ========================================
+// Load Environment & Dependencies
+// ========================================
+require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
@@ -10,76 +14,202 @@ const mammoth = require('mammoth');
 const xlsx = require('xlsx');
 const tesseract = require('tesseract.js');
 const { CosmosClient } = require("@azure/cosmos");
-const dotenv = require('dotenv');
 const helmet = require('helmet');
 const textract = require('textract');
 const { htmlToText } = require('html-to-text');
 const mime = require('mime-types');
 const removeMarkdown = require('remove-markdown');
 
+// Lazy load node-fetch to avoid runtime overhead if not used
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// Load environment variables from .env file
-dotenv.config();
-
+// ========================================
+// Configuration
+// ========================================
 const app = express();
 const port = 8080;
+const isDevelopment = process.env.NODE_ENV === 'development';
+const NINETY_DAYS_IN_MS = 90 * 24 * 60 * 60 * 1000;
 
-const upload = multer({ storage: multer.memoryStorage() });
-
-const openai = new OpenAI({
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-});
-
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret2',
-    resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false } 
-}));
-
-app.get('/session-secret', (req, res) => {
-    res.json({ secret: req.session.secret || 'defaultSecret2' });
-});
-
-app.use(express.json());
-app.use(express.static('public'));
-
+// ========================================
+// OpenAI & Cosmos DB Setup
+// ========================================
+const openai = new OpenAI({ apiKey: process.env.AZURE_OPENAI_API_KEY });
 const client = new CosmosClient({
     endpoint: process.env.COSMOS_DB_ENDPOINT,
     key: process.env.COSMOS_DB_KEY,
 });
-
-app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'", "chrome-extension:"],
-        scriptSrc: ["'self'", "chrome-extension:"],
-      },
-    },
-  }));
-
-// Get a reference to the database and container
 const database = client.database(process.env.COSMOS_DB_DATABASE_ID);
 const container = database.container(process.env.COSMOS_DB_CONTAINER_ID);
 
+// ========================================
+// File Upload Setup (in-memory)
+// ========================================
+const upload = multer({ storage: multer.memoryStorage() });
+
+// ========================================
+// Middleware: Session and Security
+// ========================================
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'defaultSecret3',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+    },
+}));
+
+app.use(express.json());
+app.use(express.static('public'));
+
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'", "https://login.microsoftonline.com"],
+            scriptSrc: ["'self'", "https://login.microsoftonline.com"],
+            connectSrc: ["'self'", "https://login.microsoftonline.com"],
+        },
+    },
+}));
+
+// ========================================
+// Authentication Middleware
+// ========================================
+async function getUserInfo(req, res, next) {
+    const header = req.headers['x-ms-client-principal'];
+
+    if (header) {
+        try {
+            const user = JSON.parse(Buffer.from(header, 'base64').toString('ascii'));
+            if (user && user.claims) {
+                const emailClaim = user.claims.find(claim =>
+                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
+                );
+                if (emailClaim) user.email = emailClaim.val;
+                
+                const nameClaim = user.claims.find(claim =>
+                    claim.typ === 'name' ||
+                    claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                );
+                if (nameClaim) user.name = nameClaim.val;
+
+            } else {
+                console.error('User claims not found');
+            }
+            req.user = user;
+            return next();
+        } catch (error) {
+            console.error('Error parsing x-ms-client-principal header:', error);
+            return next();
+        }
+    } else {
+        console.error('x-ms-client-principal header not found');
+
+        // Attempt to fetch user info from /.auth/me
+        try {
+            const authMeResponse = await fetch(`https://${req.get('host')}/.auth/me`, {
+                headers: { 'Cookie': req.headers['cookie'] },
+            });
+
+            if (authMeResponse.ok) {
+                const data = await authMeResponse.json();
+                if (data.length > 0 && data[0].user_claims) {
+                    const user = { claims: data[0].user_claims };
+                    const emailClaim = user.claims.find(claim =>
+                        claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
+                    );
+                    if (emailClaim) user.email = emailClaim.val;
+
+                    const nameClaim = user.claims.find(claim =>
+                        claim.typ === 'name' ||
+                        claim.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                    );
+                    if (nameClaim) user.name = nameClaim.val;
+
+                    req.user = user;
+                } else {
+                    console.error('No user claims found in /.auth/me response');
+                }
+            } else {
+                console.error('Failed to fetch /.auth/me:', authMeResponse.statusText);
+            }
+        } catch (error) {
+            console.error('Error fetching /.auth/me:', error);
+        }
+        next();
+    }
+}
+
+async function ensureAuthenticated(req, res, next) {
+    try {
+        if (req.user && req.user.email) {
+            // User is authenticated
+            return next();
+        }
+
+        // Handle unauthenticated access based on request type and environment
+        if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
+            // For AJAX requests, respond with a 401 Unauthorized status
+            return res.status(401).json({ error: 'Unauthorized' });
+        } else if (isDevelopment) {
+            // In development mode, simulate authentication
+            req.user = {
+                email: 'JSerpis@delta.kaplaninc.com',
+                name: 'Josh Serpis',
+                userRoles: ['authenticated'],
+            };
+            return next();
+        } else {
+            // In production, redirect unauthenticated users to the login page
+            return res.redirect('/login');
+        }
+    } catch (error) {
+        console.error('Error in ensureAuthenticated middleware:', error);
+        // Pass the error to the next middleware/error handler
+        return next(error);
+    }
+}
+
+// Mock authentication for development
+if (isDevelopment) {
+    app.use((req, res, next) => {
+        if (req.session && req.session.user) {
+            req.user = req.session.user;
+        } else {
+            req.user = {
+                email: 'JSerpis@delta.kaplaninc.com',
+                name: 'Josh Serpis',
+                userRoles: ['authenticated'],
+            };
+            req.session.user = req.user;
+        }
+        next();
+    });
+} else {
+    // ========================================
+    // Apply Authentication Middleware in Production
+    // ========================================
+    app.use(getUserInfo);
+    app.use(ensureAuthenticated);
+}
+
+// ========================================
+// Helper Functions: Chat Database Access
+// ========================================
 async function getChatHistory(chatId) {
     try {
         const { resource: chat } = await container.item(chatId, chatId).read();
         return chat;
     } catch (error) {
-        if (error.code === 404) {
-            // Chat not found
-            return null;
-        } else {
-            throw error;
-        }
+        if (error.code === 404) return null;
+        throw error;
     }
 }
 
-// Helper function to upsert chat history into Cosmos DB
 async function upsertChatHistory(chat) {
     try {
-        // Add a new chat if it does not exist or update the existing chat
         await container.items.upsert(chat, { partitionKey: chat.id });
     } catch (error) {
         console.error('Error upserting chat history:', error);
@@ -87,7 +217,6 @@ async function upsertChatHistory(chat) {
     }
 }
 
-// Function to categorize chat by date
 function categorizeChat(timestamp) {
     const chatDate = new Date(timestamp);
     const now = new Date();
@@ -96,131 +225,119 @@ function categorizeChat(timestamp) {
     const nowDateOnly = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
 
     const diffInDays = Math.floor((nowDateOnly - chatDateOnly) / (1000 * 60 * 60 * 24));
-
-    if (diffInDays === 0) {
-        return 'Today';
-    } else if (diffInDays === 1) {
-        return 'Yesterday';
-    } else if (diffInDays <= 7) {
-        return 'Previous 7 Days';
-    } else if (diffInDays <= 30) {
-        return 'Previous 30 Days';
-    } else {
-        return 'Older';
-    }
+    if (diffInDays === 0) return 'Today';
+    if (diffInDays === 1) return 'Yesterday';
+    if (diffInDays <= 7) return 'Previous 7 Days';
+    if (diffInDays <= 30) return 'Previous 30 Days';
+    return 'Older';
 }
 
-// Endpoint to handle file uploads and extract content
+// ========================================
+// Routes
+// ========================================
+
+app.get('/session-secret', (req, res) => {
+    res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
+});
+
 app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
-    const chatId = req.body.chatId;
+    const { chatId } = req.body;
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    if (!file) {
-        return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.user || !req.user.email) {
+        console.error('User not authenticated or email not found');
+        return res.status(401).json({ error: 'User not authenticated' });
     }
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!chatId) return res.status(400).json({ error: 'Missing chatId' });
 
-    if (!chatId) {
-        return res.status(400).json({ error: 'Missing chatId' });
+    if (!chatId.startsWith(`${userId}_chat_`)) {
+        return res.status(403).json({ error: 'Unauthorized' });
     }
 
     try {
         let extractedText = '';
 
+        // Handle images with OCR (tesseract.js)
         if (file.mimetype.startsWith('image/')) {
-            // Use tesseract.js to extract text from the image
             const { data: { text } } = await tesseract.recognize(file.buffer);
             extractedText = text;
         } else {
-            // Existing code for handling other file types
             const extension = path.extname(file.originalname).toLowerCase();
             const mimetype = mime.lookup(extension) || file.mimetype;
 
-            // Extract text based on file type
-            if (mimetype === 'application/pdf' || extension === '.pdf') {
-                const data = await pdfParse(file.buffer);
-                extractedText = data.text;
-            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx') {
-                const { value } = await mammoth.extractRawText({ buffer: file.buffer });
-                extractedText = value;
-            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx') {
-                const workbook = xlsx.read(file.buffer, { type: 'buffer' });
-                const sheetNames = workbook.SheetNames;
-                sheetNames.forEach(sheetName => {
-                    const sheet = workbook.Sheets[sheetName];
-                    extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
-                });
-            } else if (mimetype === 'text/plain' || extension === '.txt') {
-                extractedText = file.buffer.toString('utf-8');
-            } else if (mimetype === 'text/markdown' || extension === '.md') {
-                const markdownContent = file.buffer.toString('utf-8');
-                extractedText = removeMarkdown(markdownContent);
-            } else if (mimetype === 'text/html' || extension === '.html' || extension === '.htm') {
-                const htmlContent = file.buffer.toString('utf-8');
-                extractedText = htmlToText(htmlContent, {
-                    wordwrap: 130,
-                });
-            } else if (mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx') {
-                extractedText = await new Promise((resolve, reject) => {
-                    textract.fromBufferWithMime(file.mimetype, file.buffer, function (error, text) {
-                        if (error) {
-                            reject(error);
-                        } else {
-                            resolve(text);
-                        }
+            switch (true) {
+                case mimetype === 'application/pdf' || extension === '.pdf':
+                    const pdfData = await pdfParse(file.buffer);
+                    extractedText = pdfData.text;
+                    break;
+                case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx':
+                    const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+                    extractedText = value;
+                    break;
+                case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx':
+                    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+                    workbook.SheetNames.forEach(sheetName => {
+                        const sheet = workbook.Sheets[sheetName];
+                        extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
                     });
-                });
-            } else {
-                return res.status(400).json({ error: 'Unsupported file type.' });
+                    break;
+                case mimetype === 'text/plain' || extension === '.txt':
+                    extractedText = file.buffer.toString('utf-8');
+                    break;
+                case mimetype === 'text/markdown' || extension === '.md':
+                    extractedText = removeMarkdown(file.buffer.toString('utf-8'));
+                    break;
+                case mimetype === 'text/html' || extension === '.html' || extension === '.htm':
+                    extractedText = htmlToText(file.buffer.toString('utf-8'), { wordwrap: 130 });
+                    break;
+                case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx':
+                    extractedText = await new Promise((resolve, reject) => {
+                        textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
+                            if (err) reject(err);
+                            else resolve(text);
+                        });
+                    });
+                    break;
+                default:
+                    return res.status(400).json({ error: 'Unsupported file type.' });
             }
         }
 
         let chat = await getChatHistory(chatId);
-
         if (!chat) {
             chat = {
                 id: chatId,
                 title: 'File Upload',
                 messages: [],
                 timestamp: new Date().toISOString(),
-                total_document_count: 0,  // Initialize document count
-                total_document_size: 0,   // Initialize document size
+                total_document_count: 0,
+                total_document_size: 0,
+                documentContent: '',
             };
         }
 
-        // Initialize document tracking fields if they don't exist
-        if (typeof chat.total_document_count !== 'number') {
-            chat.total_document_count = 0;
-        }
-        if (typeof chat.total_document_size !== 'number') {
-            chat.total_document_size = 0;
-        }
+        // Ensure fields
+        if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+        if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // Increment the document count
+        // Update document stats
         chat.total_document_count += 1;
-
-        // Add the document size to the total
         chat.total_document_size += file.size || 0;
 
-        // Optionally, store the size of the individual document in the message history
+        // Append a message referencing the uploaded document
         chat.messages.push({
             role: 'user',
             content: `Uploaded a document: ${file.originalname}`,
             timestamp: new Date().toISOString(),
-            tokens: 0, // Assuming no tokens for this message
-            documentSize: file.size || 0, // Store individual document size
+            documentSize: file.size || 0,
         });
 
-        // Store the extracted text in the chat document
-        if (!chat.documentContent) {
-            chat.documentContent = extractedText;
-        } else {
-            // Append the new extracted text to existing content
-            chat.documentContent += '\n' + extractedText;
-        }
+        // Append extracted text to the chat's stored document content
+        chat.documentContent = (chat.documentContent || '') + '\n' + extractedText;
 
-        // Upsert the chat document
         await upsertChatHistory(chat);
-
         res.status(200).json({ success: true });
 
     } catch (error) {
@@ -229,300 +346,226 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 });
 
+app.post('/chat', upload.array('image'), async (req, res) => {
+    const { message, tutorMode, chatId: providedChatId } = req.body;
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
+    // Test condition: If user sends "test-rate-limit" message, respond with a 429 error
+    if (message === "test-rate-limit") {
+        return res.status(429).json({ retryAfter: 10 });
+    }
 
-// Endpoint to handle user messages and interact with OpenAI
-app.post('/chat', upload.single('image'), async (req, res) => {
-    const { message, tutorMode } = req.body;
-    const file = req.file;
-
-    // Retrieve session secret from the session or use a default
-    const sessionSecret = req.session.secret || 'defaultSecret3';
-
-    // If no chatId is provided in the request, generate one
-    let { chatId } = req.body;
+    let chatId = providedChatId;
     if (!chatId) {
-        const randomNumber = Math.random().toString(36).substr(2, 9);  // Generate a unique number
-        chatId = `${sessionSecret}_chat_${randomNumber}`;  // Format: "secret_chat_number"
+        const randomNumber = Math.random().toString(36).substr(2, 9);
+        chatId = `${userId}_chat_${randomNumber}`;
     }
 
-    // Validate that either a message or file is present
-    if (!message && !file) {
-        return res.status(400).json({ error: 'Missing message or file' });
+    // If no message and no images, return error
+    if (!message && (!req.files || req.files.length === 0)) {
+        return res.status(400).json({ error: 'Missing message or files' });
     }
 
-    try {
-        console.log(`Received message: "${message}" with Tutor Mode: ${tutorMode ? 'ON' : 'OFF'} and chatId: ${chatId}`);
+    let chat = await getChatHistory(chatId);
+    const isNewChat = !chat;
 
-        // Retrieve existing chat history or create a new one
-        let chat = await getChatHistory(chatId);
-
-        let isNewChat = false;
-        if (!chat) {
-            isNewChat = true;
-            chat = {
-                id: chatId,
-                title: 'New Chat', // Temporary title
-                messages: [],
-                timestamp: new Date().toISOString(), // Chat creation timestamp
-                total_tokens_used: 0,  // Initialize token counter
-                total_interactions: 0, // Initialize interaction counter
-                average_tokens_per_interaction: 0, // Initialize average token usage
-                total_image_count: 0, // Initialize image count
-                total_image_size: 0, // Initialize total image size
-                total_document_count: 0, // Initialize document count
-                total_document_size: 0, // Initialize document size
-            };
-        }
-
-        // Initialize document tracking fields if they don't exist
-        if (typeof chat.total_document_count !== 'number') {
-            chat.total_document_count = 0;
-        }
-        if (typeof chat.total_document_size !== 'number') {
-            chat.total_document_size = 0;
-        }
-
-        // Build messages array from existing chat history
-        let messages = chat.messages.slice(-5).map(msg => ({
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp,
-            tokens: msg.tokens // Keep the previous token counts
-        }));
-
-        // Add system message
-        const systemMessage = {
-            role: 'system',
-            content: tutorMode
-                ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-                : 'You are an assistant that remembers all previous interactions in this chat and can recall them when asked.',
+    if (!chat) {
+        chat = {
+            id: chatId,
+            title: 'New Chat',
+            visibility: 1,
+            messages: [],
             timestamp: new Date().toISOString(),
+            total_tokens_used: 0,
+            total_interactions: 0,
+            average_tokens_per_interaction: 0,
+            total_image_count: 0,
+            total_image_size: 0,
+            total_document_count: 0,
+            total_document_size: 0,
         };
-        messages.unshift(systemMessage);
+    }
 
-        // Add user message if present and not an image
-        if (message && (!file || !file.mimetype.startsWith('image/'))) {
-            messages.push({
-                role: 'user',
-                content: message,
-                timestamp: new Date().toISOString(),
-            });
-        }
+    // Ensure numeric fields
+    if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+    if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // Handle image upload if present
-        if (file && file.mimetype.startsWith('image/')) {
-            const base64Image = file.buffer.toString('base64');
-            const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
+    // Prepare last 20 messages for context, including timestamps in content
+    let messages = chat.messages.slice(-20).map(msg => ({
+        role: msg.role,
+        // Integrate the timestamp into the content so the model can see it
+        content: `[${msg.timestamp}] ${msg.content}`,
+        tokens: msg.tokens
+    }));
 
-            messages.push({
-                role: 'user',
-                content: [
-                    {
-                        "type": "text",
-                        "text": message || 'Please analyze the following image:',
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": imageUrl,
-                        },
-                    },
-                ],
-                timestamp: new Date().toISOString(),
-            });
+    // Add system message with or without Tutor Mode
+    const systemMessage = {
+        role: 'system',
+        content: tutorMode
+            ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
+            : "You are KaplanGPT, an assistant at Kaplan UK, a company providing apprenticeships and professional qualification in accounting & tax as well as data and IT. \n\nYour job is to help Kaplan staff members do their jobs. The staff work in the production and delivery of Kaplan's educational products. You may talk freely about topics that a user wants to discuss. You will be provided with data, documents and Kaplan's IP that you should converse freely about to the user.\n\nAs well as providing information about Kaplan, you will also assist with summarising; rewriting; checking spelling, grammar and tone of voice; helping to write materials; writing, checking and helping to refactor code; managing staff members; analysing documents and providing details contained within them; day-to-day admin tasks; as well as any other tasks that help staff at Kaplan perform their roles.\n\nIf a user provides you with a source of content and queries it, you must limit your answer to information contained within that content unless specifically asked otherwise.\n\nYou must not answer any questions on material produced by Tolley that a user adds as a prompt. If there is evidence to suggest the content you are provided with is produced by Tolley, you must let the user know you are not able to answer questions on Tolley material as requested by Tolley. You may answer general questions about Tolley as a business.\n\nYou have a friendly and professional manner and will always use British English. You must also use British as the default setting for other things such as when asked about law, regulations, standards or popular culture unless explicitly asked otherwise by the user. \n\n Remembers all previous interactions in this chat and can recall them when asked.",
+        timestamp: new Date().toISOString(),
+    };
+    messages.unshift(systemMessage);
 
-            // Initialize image tracking fields if they don't exist
-            if (typeof chat.total_image_count !== 'number') {
-                chat.total_image_count = 0;
+    // Build user content array with text and images
+    let userContentArray = [];
+    if (message) {
+        userContentArray.push({ type: 'text', text: message });
+    }
+
+    // Process multiple images
+    if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+            if (file.mimetype.startsWith('image/')) {
+                const base64Image = file.buffer.toString('base64');
+                const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
+
+                // Add the image to the user message content
+                userContentArray.push({ type: "image_url", image_url: { url: imageUrl } });
+
+                // Update image stats
+                if (typeof chat.total_image_count !== 'number') chat.total_image_count = 0;
+                if (typeof chat.total_image_size !== 'number') chat.total_image_size = 0;
+
+                chat.total_image_count += 1;
+                chat.total_image_size += file.size || 0;
             }
-            if (typeof chat.total_image_size !== 'number') {
-                chat.total_image_size = 0;
-            }
-
-            // Increment the image count
-            chat.total_image_count += 1;
-
-            // Add the image size to the total
-            chat.total_image_size += file.size || 0;
-
-            // Optionally, you can store the size of the individual image in the message history if needed
-            chat.messages.push({
-                role: 'user',
-                content: message || 'Sent an image',
-                timestamp: new Date().toISOString(),
-                tokens: 0, // Assuming no tokens for image message
-                imageSize: file.size || 0, // Store individual image size
-            });
         }
+    }
 
-        // Handle document content if it exists in chat
-        if (chat.documentContent) {
-            messages.push({
-                role: 'user',
-                content: `Here is the document content:\n${chat.documentContent}`,
-                timestamp: new Date().toISOString(),
-            });
-            // Do not delete chat.documentContent; let it persist across messages
-        }
+    // If we have at least text or images, create a user message
+    if (userContentArray.length > 0) {
+        messages.push({
+            role: 'user',
+            content: userContentArray,
+            timestamp: new Date().toISOString(),
+        });
 
-        // Prepare payload for OpenAI
-        const payload = {
-            model: 'gpt-4o',
-            messages: messages,
-        };
+        // Also store in chat history (just store the text or "Sent images")
+        chat.messages.push({
+            role: 'user',
+            content: message || 'Sent images',
+            timestamp: new Date().toISOString(),
+            tokens: 0,
+        });
+    }
 
-        // Make API call to OpenAI
-        const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+    // Include document content if available
+    if (chat.documentContent) {
+        messages.push({
+            role: 'user',
+            content: `[${new Date().toISOString()}] Here is the document content:\n${chat.documentContent}`,
+            timestamp: new Date().toISOString(),
+        });
+    }
+
+    // Call OpenAI
+    const payload = {
+        model: 'gpt-4o',
+        messages: messages,
+        temperature: 0.7,
+    };
+
+    const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'api-key': process.env.AZURE_OPENAI_API_KEY,
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error from OpenAI API:', errorText);
+        return res.status(500).json({ error: `OpenAI request failed: ${response.statusText}` });
+    }
+
+    const data = await response.json();
+    const aiResponse = data.choices[0].message.content;
+    const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
+
+    console.log('AI Response:', aiResponse);
+    console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
+
+    // Store assistant response in chat
+    chat.messages.push({
+        role: 'assistant',
+        content: aiResponse,
+        timestamp: new Date().toISOString(),
+        tokens: completion_tokens,
+    });
+
+    // Update stats
+    chat.total_tokens_used += total_tokens;
+    chat.total_interactions += 2;
+    chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
+    chat.timestamp = new Date().toISOString();
+
+    // Generate a title for a new chat
+    if (isNewChat) {
+        const titlePrompt = [
+            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
+            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
+        ];
+
+        const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
+
+        const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'api-key': process.env.AZURE_OPENAI_API_KEY,
             },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(titlePayload),
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Error from OpenAI API:', errorText);
-            throw new Error(`Error: ${response.statusText}`);
+        if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            const generatedTitle = titleData.choices[0].message.content.trim();
+            chat.title = generatedTitle;
+        } else {
+            const errorText = await titleResponse.text();
+            console.error('Error generating title:', errorText);
         }
-
-        const data = await response.json();
-        const aiResponse = data.choices[0].message.content;
-
-        // Token information from the response
-        const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
-
-        console.log('AI Response:', aiResponse);
-        console.log(`Tokens used - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
-
-        // Append new user messages to chat history without image data
-        if (message && (!file || !file.mimetype.startsWith('image/'))) {
-            chat.messages.push({
-                role: 'user',
-                content: message,
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens, // Add input tokens for user message
-            });
-        }
-
-        if (file && file.mimetype.startsWith('image/')) {
-            // Do not include image data in chat history
-            chat.messages.push({
-                role: 'user',
-                content: message || 'Sent an image',
-                timestamp: new Date().toISOString(),
-                tokens: prompt_tokens, // Add input tokens for image message
-            });
-        }
-
-        // Add assistant's message with token count
-        chat.messages.push({
-            role: 'assistant',
-            content: aiResponse,
-            timestamp: new Date().toISOString(),
-            tokens: completion_tokens, // Add output tokens for AI response
-        });
-
-        // Update overall token usage for the chat session
-        chat.total_tokens_used += total_tokens;  // Accumulate total tokens used
-        chat.total_interactions += 2;  // Each user message and assistant response counts as 2 interactions
-
-        // Calculate the average tokens per interaction
-        chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
-
-        // Update timestamp for the overall chat
-        chat.timestamp = new Date().toISOString();
-
-        // If this is a new chat, generate a title
-        if (isNewChat) {
-            // Generate chat title using OpenAI
-            const titlePrompt = [
-                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and capture the essence of the conversation.' },
-                { role: 'user', content: message }
-            ];
-
-            // Prepare payload for OpenAI
-            const titlePayload = {
-                model: 'gpt-4o',
-                messages: titlePrompt,
-            };
-
-            // Make API call to OpenAI
-            const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'api-key': process.env.AZURE_OPENAI_API_KEY,
-                },
-                body: JSON.stringify(titlePayload),
-            });
-
-            if (!titleResponse.ok) {
-                const errorText = await titleResponse.text();
-                console.error('Error from OpenAI API when generating title:', errorText);
-                // Proceed without updating the title
-            } else {
-                const titleData = await titleResponse.json();
-                const generatedTitle = titleData.choices[0].message.content.trim();
-                // Update the chat's title
-                chat.title = generatedTitle;
-            }
-        }
-
-        // Upsert the chat document into Cosmos DB
-        await upsertChatHistory(chat);
-
-        // Categorize the chat based on timestamp
-        const category = categorizeChat(chat.timestamp);
-
-        res.json({ 
-            response: aiResponse, 
-            chatId, 
-            category, 
-            tokens: total_tokens, 
-            average_tokens_per_interaction: chat.average_tokens_per_interaction,
-            total_image_count: chat.total_image_count,
-            total_image_size: chat.total_image_size,
-            total_document_count: chat.total_document_count,
-            total_document_size: chat.total_document_size,
-        });
-    } catch (error) {
-        console.error('Error processing chat request:', error);
-        res.status(500).json({ error: 'Something went wrong with OpenAI' });
     }
+
+    await upsertChatHistory(chat);
+    const category = categorizeChat(chat.timestamp);
+
+    res.json({
+        response: aiResponse,
+        chatId,
+        category,
+        tokens: total_tokens,
+        average_tokens_per_interaction: chat.average_tokens_per_interaction,
+        total_image_count: chat.total_image_count,
+        total_image_size: chat.total_image_size,
+        total_document_count: chat.total_document_count,
+        total_document_size: chat.total_document_size,
+    });
 });
 
-// Endpoint to get the list of chat sessions with categories
 app.get('/chats', async (req, res) => {
     try {
-        // Get session secret or default
-        const sessionSecret = req.session.secret || 'defaultSecret2';
+        const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-        // Query for all chats
-        const querySpec = {
-            query: 'SELECT c.id, c.title, c.timestamp FROM c',
-        };
-
+        // Query all chats for the container
+        const querySpec = { query: 'SELECT c.id, c.title, c.timestamp, c.visibility FROM c' };
         const { resources: chats } = await container.items.query(querySpec).fetchAll();
 
+        // Filter by current user's chats
+        const filteredChats = chats.filter(chat => chat.id.startsWith(`${userId}_chat_`));
         const categorizedChats = {};
 
-        // Filter chats that belong to the current session secret
-        const filteredChats = chats.filter(chat => chat.id.startsWith(`${sessionSecret}_chat_`));
-
-        // Categorize the chats based on date
         filteredChats.forEach(chat => {
             const category = categorizeChat(chat.timestamp);
-
-            if (!categorizedChats[category]) {
-                categorizedChats[category] = [];
-            }
-
+            if (!categorizedChats[category]) categorizedChats[category] = [];
             categorizedChats[category].push({
                 chatId: chat.id,
                 title: chat.title,
+                visibility: chat.visibility,
             });
         });
 
@@ -533,57 +576,96 @@ app.get('/chats', async (req, res) => {
     }
 });
 
-// Endpoint to retrieve a specific chat history
 app.get('/chats/:chatId', async (req, res) => {
     const { chatId } = req.params;
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
+
+    if (!chatId.startsWith(`${userId}_chat_`)) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
 
     try {
         const chat = await getChatHistory(chatId);
-
-        if (chat) {
-            res.json(chat);
-        } else {
-            res.status(404).json({ error: 'Chat not found' });
-        }
+        if (chat) res.json(chat);
+        else res.status(404).json({ error: 'Chat not found' });
     } catch (error) {
         console.error('Error retrieving chat:', error);
         res.status(500).json({ error: 'Failed to retrieve chat' });
     }
 });
 
+app.delete('/chats/:chatId', async (req, res) => {
+    const { chatId } = req.params;
+    try {
+        const { resource: chat } = await container.item(chatId, chatId).read();
+        if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+        chat.visibility = 2;
+        await upsertChatHistory(chat);
+        res.json({ message: 'Chat visibility updated' });
+    } catch (error) {
+        console.error('Error updating chat visibility:', error);
+        res.status(500).json({ error: 'Failed to update chat visibility' });
+    }
+});
+
 async function deleteOldChats() {
     try {
-        const querySpec = {
-            query: 'SELECT c.id, c.timestamp FROM c',
-        };
-
+        const querySpec = { query: 'SELECT * FROM c' };
         const { resources: chats } = await container.items.query(querySpec).fetchAll();
 
         const now = new Date();
-        const ninetyDaysInMillis = 90 * 24 * 60 * 60 * 1000;  // 90 days in milliseconds
-
         for (const chat of chats) {
             const chatTimestamp = new Date(chat.timestamp);
-            const ageInMillis = now - chatTimestamp;
-
-            if (ageInMillis > ninetyDaysInMillis) {
-                // Chat is older than 90 days, delete it
-                await container.item(chat.id, chat.id).delete();
-                console.log(`Deleted chat with ID: ${chat.id} because it is older than 90 days.`);
+            if ((now - chatTimestamp) > NINETY_DAYS_IN_MS) {
+                delete chat.messages;
+                delete chat.timestamp;
+                delete chat.total_document_count;
+                delete chat.total_image_count;
+                await container.items.upsert(chat, { partitionKey: chat.id });
+                console.log(`Updated chat with ID: ${chat.id} by deleting specified fields (older than 90 days).`);
             }
         }
     } catch (error) {
-        console.error('Error deleting old chats:', error);
+        console.error('Error deleting fields from old chats:', error);
     }
 }
 
-// Run the deletion check immediately on server start
+// Run old chat cleanup on startup and every 24 hours
 deleteOldChats();
+setInterval(deleteOldChats, 24 * 60 * 60 * 1000);
 
-// Schedule the old chat deletion to run every 24 hours
-setInterval(deleteOldChats, 24 * 60 * 60 * 1000); // Runs every 24 hours
+// Auth Routes
+if (isDevelopment) {
+    app.get('/login', (req, res) => {
+        req.user = { userId: 'test-user-id', userDetails: 'Josh Serpis', userRoles: ['authenticated'] };
+        res.redirect('/');
+    });
 
-// Start the server on the specified port
+    app.get('/logout', (req, res) => {
+        req.user = null;
+        res.redirect('/');
+    });
+} else {
+    app.get('/login', (req, res) => res.redirect('/.auth/login/aad'));
+    app.get('/logout', (req, res) => res.redirect('/.auth/logout'));
+}
+
+app.get('/user-info', (req, res) => {
+    const userId = req.user.email;
+    const userName = req.user.name || 'User';
+    res.json({ userId, userName });
+});
+
+// Debug middleware
+app.use((req, res, next) => {
+    console.log('Authenticated user:', req.user);
+    next();
+});
+
+// ========================================
+// Start the Server
+// ========================================
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });

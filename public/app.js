@@ -2,6 +2,16 @@
 let chatId = generateChatId();
 sessionStorage.setItem('chatId', chatId);
 
+document.addEventListener("DOMContentLoaded", () => {
+    if (window.MathJax) {
+        MathJax.startup.promise.then(() => {
+            console.log("MathJax is loaded and ready.");
+        });
+    } else {
+        console.error("MathJax failed to load.");
+    }
+});
+
 // Initialize variables
 let isFirstInteraction = true;
 
@@ -19,6 +29,40 @@ const tutorModeButton = document.getElementById('tutor-mode-button');
 const tutorModeDropdown = document.getElementById('tutor-mode-dropdown');
 const dropdownItems = document.querySelectorAll('#tutor-mode-dropdown .dropdown-item');
 
+const inputContainer = document.querySelector('.input-container');
+
+// Add drag-and-drop event listeners
+inputContainer.addEventListener('dragenter', handleDragEnter, false);
+inputContainer.addEventListener('dragover', handleDragOver, false);
+inputContainer.addEventListener('dragleave', handleDragLeave, false);
+inputContainer.addEventListener('drop', handleDrop, false);
+
+let selectedImageFiles = [];
+
+function isSupportedImageType(file) {
+    const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/svg+xml', 'image/tiff', 'image/heic'];
+    return allowedImageTypes.includes(file.type.toLowerCase());
+}
+
+function handleFirstTab(e) {
+    if (e.key === 'Tab') {
+        document.body.classList.add('user-is-tabbing');
+        window.removeEventListener('keydown', handleFirstTab);
+        window.addEventListener('mousedown', handleMouseDownOnce);
+    }
+}
+
+// This function listens for the first mouse click after a Tab press.
+// When a mouse is used, we remove the 'user-is-tabbing' class.
+function handleMouseDownOnce() {
+    document.body.classList.remove('user-is-tabbing');
+    window.removeEventListener('mousedown', handleMouseDownOnce);
+    window.addEventListener('keydown', handleFirstTab);
+}
+
+// Add initial event listeners on page load
+window.addEventListener('keydown', handleFirstTab);
+
 // Function to update the checkmark based on the selected mode
 function updateCheckmark() {
     dropdownItems.forEach(item => {
@@ -34,18 +78,6 @@ function updateCheckmark() {
 
 // Initialize the dropdown with the correct state (Normal selected by default)
 updateCheckmark();
-
-// Toggle the dropdown visibility when the "group" icon is clicked
-tutorModeButton.addEventListener('click', function() {
-    tutorModeDropdown.style.display = tutorModeDropdown.style.display === 'block' ? 'none' : 'block';
-});
-
-// Close the dropdown if the user clicks outside of it
-window.addEventListener('click', function(event) {
-    if (!event.target.matches('#tutor-mode-button')) {
-        tutorModeDropdown.style.display = 'none';
-    }
-});
 
 // Add event listeners to the dropdown items to toggle Tutor Mode
 dropdownItems.forEach(item => {
@@ -69,68 +101,294 @@ dropdownItems.forEach(item => {
     });
 });
 
+function displayPopup(message) {
+    // Create the popup container
+    const popupContainer = document.createElement('div');
+    popupContainer.classList.add('popup-container');
+
+    // Create the popup message element
+    const popupMessage = document.createElement('div');
+    popupMessage.classList.add('popup-message');
+    popupMessage.textContent = message;
+
+    // Create a close button
+    const closeButton = document.createElement('span');
+    closeButton.classList.add('popup-close-button');
+    closeButton.textContent = '×'; // Unicode multiplication sign
+
+    // Add click event to close the popup
+    closeButton.addEventListener('click', () => {
+        popupContainer.remove();
+    });
+
+    // Append message and close button to the container
+    popupContainer.appendChild(popupMessage);
+    popupContainer.appendChild(closeButton);
+
+    // Insert the popup container above the input-container
+    const chatWindow = document.querySelector('.chat-window');
+    const inputContainer = document.querySelector('.input-container');
+    chatWindow.insertBefore(popupContainer, inputContainer);
+
+    // Optional: Auto-remove the popup after a certain time (e.g., 5 seconds)
+    setTimeout(() => {
+        popupContainer.remove();
+    }, 5000);
+}
+
+function getFileExtension(fileName) {
+    const parts = fileName.split('.');
+    return parts.length > 1 ? parts.pop() : 'unknown';
+}
+
 // Send message function - ensure tutorMode is passed
 async function sendMessage(message) {
-    const res = await fetch('/chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-            message: message, 
-            chatId: chatId, 
-            tutorMode: isTutorModeOn,
-        }),
-    });
-    const data = await res.json();
-    return data.response;
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ message, chatId, tutorMode: isTutorModeOn }),
+            credentials: 'include',
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (response.status === 429) {
+            const { retryAfter } = await response.json();
+            displayRateLimitMessage(retryAfter);
+            // Return null to indicate we should not append the user's message
+            return null;
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.response;
+    } catch (error) {
+        console.error('Error sending message:', error);
+        return null;
+    }
 }
+
+function displayRateLimitMessage(retryAfter) {
+    const chatBox = document.getElementById('chat-box');
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('message', 'ai'); // Apply AI message styling (assuming 'ai' or 'ai-message' class)
+    
+    const messageContent = document.createElement('div');
+    messageContent.classList.add('message-content');
+
+    const aiIcon = document.createElement("img");
+    aiIcon.src = "images/K_logo.svg";
+    aiIcon.alt = "AI Icon";
+    aiIcon.classList.add("ai-icon");
+
+    const messageBody = document.createElement("div");
+    messageBody.classList.add("message-body");
+
+    const textElement = document.createElement('div');
+    textElement.classList.add('message-text');
+    textElement.textContent = `Sorry, the rate limit has been hit and will come online in ${retryAfter} seconds.`;
+    messageBody.appendChild(textElement);
+
+    messageContent.appendChild(aiIcon);
+    messageContent.appendChild(messageBody);
+    messageElement.appendChild(messageContent);
+
+    chatBox.appendChild(messageElement);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Automatically remove the message after 'retryAfter' seconds
+    setTimeout(() => {
+        if (messageElement && messageElement.parentNode) {
+            messageElement.parentNode.removeChild(messageElement);
+        }
+    }, retryAfter * 100);
+}
+
 
 // Handle clicking the attach icon to trigger the file input
 attachIcon.addEventListener('click', () => {
     //fileUpload.click(); // Manually trigger the file input
 });
 
+function isDevelopment() {
+    return window.location.hostname === 'localhost';
+}
+
 // Load existing chats from history and categorize them
 async function loadChatHistory() {
-    const res = await fetch('/chats');
-    const chats = await res.json();
-
-    chatHistoryList.innerHTML = ''; // Clear the existing list
-
-    // Define the desired category order, with 'Today' at the top
-    const orderedCategories = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
-
-    // Filter only the categories that are present in the fetched chats
-    const availableCategories = orderedCategories.filter(category => chats[category]);
-
-    // Loop through the ordered categories and render the chat items
-    availableCategories.forEach(category => {
-        const categoryItem = document.createElement('li');
-        categoryItem.textContent = category;
-        categoryItem.classList.add('chat-category-list');
-        chatHistoryList.appendChild(categoryItem);
-
-        const chatItems = document.createElement('ul');
-
-        // Reverse the chats for each category to show most recent first
-        const reversedChats = chats[category].slice().reverse();
-
-        // Append each chat item
-        reversedChats.forEach(chat => {
-            const chatItem = document.createElement('li');
-            chatItem.textContent = chat.title;
-            chatItem.dataset.chatId = chat.chatId;
-            chatItem.classList.add('chat-item');
-
-            // Load previous chat on click
-            chatItem.addEventListener('click', () => loadChat(chat.chatId));
-            chatItems.appendChild(chatItem);
+    try {
+        const res = await fetch('/chats', {
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
         });
 
-        chatHistoryList.appendChild(chatItems);
-    });
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
+        const chats = await res.json();
+
+        // Clear the existing chat history list
+        chatHistoryList.innerHTML = '';
+
+        // Define the category order
+        const orderedCategories = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
+
+        // Filter only the categories present in the fetched chats
+        const availableCategories = orderedCategories.filter(category => chats[category]);
+
+        // Loop through the categories and render the chat items
+        for (const category of availableCategories) {
+            // Create and append category heading
+            const categoryItem = document.createElement('li');
+            categoryItem.textContent = category;
+            categoryItem.classList.add('chat-category-list');
+            chatHistoryList.appendChild(categoryItem);
+
+            const chatItems = document.createElement('ul');
+            const reversedChats = chats[category].slice().reverse();
+
+            for (const chat of reversedChats) {
+                // Create the chat item container
+                const chatItem = document.createElement('li');
+                chatItem.dataset.chatId = chat.chatId;
+                chatItem.classList.add('chat-item');
+                chatItem.setAttribute('role', 'group');
+                chatItem.setAttribute('aria-label', `Chat item for ${sanitizeText(chat.title)}`);
+
+                // Add click event listener to load chat
+                chatItem.addEventListener('click', () => loadChat(chat.chatId));
+
+                // Add focus and blur event listeners for active state
+                chatItem.addEventListener('focus', () => chatItem.classList.add('active'));
+                chatItem.addEventListener('blur', () => chatItem.classList.remove('active'));
+
+                // Create and sanitize the chat title
+                const chatTitle = document.createElement('span');
+                chatTitle.textContent = sanitizeText(chat.title);
+                chatTitle.classList.add('chat-title');
+                chatTitle.setAttribute('tabindex', '0'); // Make focusable
+                chatTitle.setAttribute('role', 'button'); // Semantics for screen readers
+                chatTitle.setAttribute('aria-label', `Chat titled ${sanitizeText(chat.title)}`);
+
+                // Attach input validation logic to the chat title
+                chatTitle.addEventListener('input', () => validateChatTitle(chatTitle));
+
+                // Add click event listener to load chat
+                chatTitle.addEventListener('click', () => loadChat(chat.chatId));
+
+                // Add keyboard event listener for Enter and Space keys
+                chatTitle.addEventListener('keydown', async function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        await loadChat(chat.chatId);
+                    }
+                });
+
+                // Create delete button
+                const binIconButton = document.createElement('button');
+                binIconButton.classList.add('bin-icon-button');
+                binIconButton.setAttribute('aria-label', `Delete chat titled ${sanitizeText(chat.title)}`);
+
+                const binIcon = document.createElement('i');
+                binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
+                binIconButton.appendChild(binIcon);
+
+                // Add click event to delete the chat
+                binIconButton.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent click from triggering loadChat
+                    deleteChat(chat.chatId);
+                });
+
+                // Append the chat title and delete button to the chat item
+                chatItem.appendChild(chatTitle);
+                chatItem.appendChild(binIconButton);
+
+                // Handle visibility
+                if (chat.visibility !== 1 && chat.visibility !== undefined) {
+                    chatItem.style.display = 'none';
+                }
+
+                chatItems.appendChild(chatItem);
+            }
+
+            chatHistoryList.appendChild(chatItems);
+        }
+    } catch (error) {
+        console.error('Error loading chat history:', error);
+    }
 }
+
+// Helper function to sanitize chat titles
+function sanitizeText(text) {
+    return text.replace(/[^a-zA-Z0-9\s]/g, ''); // Allow only alphanumeric characters and spaces
+}
+
+// Helper function to validate chat title input dynamically
+function validateChatTitle(inputElement) {
+    const sanitizedText = inputElement.textContent.replace(/[^a-zA-Z0-9\s]/g, ''); // Remove invalid characters
+    if (inputElement.textContent !== sanitizedText) {
+        inputElement.textContent = sanitizedText; // Update if invalid characters are removed
+    }
+}
+
+function createScrollTable(index, element) {
+    const root = element; // element is a DOM element, not a jQuery object
+    const icon = root.querySelector(".swipe-icon");
+    const table = root.querySelector(".table-responsive");
+    const accessibleMessage = root.querySelector(".accessible-message");
+
+    function setupAria(index, target) {
+        let label = "message-label-" + index;
+        target.setAttribute('id', label);
+        table.setAttribute('aria-labelledby', label);
+    }
+
+    function updateDOM() {
+        const hasScrollBar = table.scrollWidth > table.clientWidth;
+        const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+
+        if (hasScrollBar && isTouchDevice) {
+            icon.classList.remove("d-none");
+        } else {
+            icon.classList.add("d-none");
+        }
+    }
+
+    // Setup ARIA attributes initially
+    setupAria(index, accessibleMessage);
+
+    // Run updateDOM now
+    updateDOM();
+
+    // Listen for resize
+    window.addEventListener("resize", updateDOM);
+
+    // Return any methods or properties that need external access (optional)
+    return {
+        updateDOM,
+        setupAria
+    };
+}
+
 
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
@@ -140,23 +398,24 @@ async function loadChat(chatIdToLoad) {
     const res = await fetch(`/chats/${chatId}`);
     const chat = await res.json();
 
-    chatBox.innerHTML = ''; // Clear the chat window
+    chatBox.innerHTML = '';
 
     // If the chat has no messages, show the welcome screen
     if (chat.messages.length === 0) {
         showWelcomeScreen();
     } else {
-        hideWelcomeScreen(); // Hide the welcome screen if there are messages
+        hideWelcomeScreen();
     }
 
     // Append the messages to the chat window
     chat.messages.forEach(msg => {
         appendMessage(msg.role === 'user' ? 'You' : 'AI', msg.content, false);
     });
+
+    chatInput.focus();
 }
 
 newChatBtn.addEventListener('click', () => {
-    // Clear chat window and show the welcome screen
     chatBox.innerHTML = '';
     showWelcomeScreen();
 
@@ -164,7 +423,7 @@ newChatBtn.addEventListener('click', () => {
     chatId = generateChatId();
     sessionStorage.setItem('chatId', chatId);
 
-    loadChatHistory(); // Reload chat history in the side panel
+    loadChatHistory();
     isFirstInteraction = true;
 });
 
@@ -176,7 +435,35 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const messageContent = document.createElement("div");
     messageContent.classList.add("message-content");
 
-    // AI message handling
+    // Regex pattern now includes:
+    // - $$...$$
+    // - \( ... \)
+    // - $...$
+    // - \[ ... \]
+    const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
+
+    function processTextWithMarkdownAndMath(text) {
+        const mathSegments = [];
+        let placeholderIndex = 0;
+
+        // Extract math segments and replace with placeholders
+        const textWithPlaceholders = text.replace(mathPattern, (match) => {
+            mathSegments.push(match);
+            return `%%%MATH${placeholderIndex++}%%%`;
+        });
+
+        // Convert markdown (excluding math) to HTML
+        const parsedHTML = marked.parse(textWithPlaceholders);
+
+        // Restore math segments
+        let finalHTML = parsedHTML;
+        mathSegments.forEach((segment, i) => {
+            finalHTML = finalHTML.replace(`%%%MATH${i}%%%`, segment);
+        });
+
+        return finalHTML;
+    }
+
     if (sender === "AI") {
         const aiIcon = document.createElement("img");
         aiIcon.src = "images/K_logo.svg";
@@ -186,65 +473,92 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
-        let entireMessage = ''; // To store the entire message
+        let entireMessage = '';
 
-        // Use a regex to split the content into normal text and code blocks
+        // Split text into normal segments and code blocks
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
+        let language = ''; // Captures the language from the regex
+
         parts.forEach((part, index) => {
+            const safePart = (part || '').trim();
+
+            // Every 3rd part is either text or code based on index
             if (index % 3 === 0) {
-                // Regular text part
+                // Regular text may contain markdown & math
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
-                // Use the same text rendering method for normal text
-                const parsedText = marked.parse(part.trim());
-                messageText.innerHTML = parsedText;
+                const finalHTML = processTextWithMarkdownAndMath(safePart);
+                messageText.innerHTML = finalHTML;
 
-                // After setting messageText.innerHTML = parsedText, render any LaTeX
-                renderMathInElement(messageText, {
-                    delimiters: [
-                        { left: "$$", right: "$$", display: true },    // For block equations
-                        { left: "$", right: "$", display: false },     // For inline equations
-                        { left: "\\[", right: "\\]", display: true },  // For block equations (escaped)
-                        { left: "\\(", right: "\\)", display: false }  // For inline equations (escaped)
-                    ],
-                    throwOnError: false
+                // Wrap tables, if any
+                const tables = messageText.querySelectorAll('table');
+                tables.forEach((table, tIndex) => {
+                    table.classList.add('table', 'table-bordered');
+                    
+                    const tableContainer = document.createElement('div');
+                    tableContainer.classList.add('table-responsive-container');
+
+                    const scrollableDiv = document.createElement('div');
+                    scrollableDiv.classList.add('table-responsive');
+                    scrollableDiv.setAttribute('tabindex', '0');
+                    scrollableDiv.setAttribute('role', 'region');
+
+                    const accessibleMessage = document.createElement('span');
+                    accessibleMessage.classList.add('accessible-message', 'visually-hidden');
+                    accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+
+                    const swipeIcon = document.createElement('div');
+                    swipeIcon.classList.add('svg-icon', 'swipe-icon');
+                    swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+
+                    const oldParent = table.parentNode;
+                    oldParent.insertBefore(tableContainer, table);
+
+                    tableContainer.appendChild(scrollableDiv);
+                    tableContainer.appendChild(accessibleMessage);
+                    tableContainer.appendChild(swipeIcon);
+                    scrollableDiv.appendChild(table);
                 });
 
                 messageBody.appendChild(messageText);
-                entireMessage += part.trim();
+                entireMessage += safePart;
+
             } else if (index % 3 === 1) {
-                // Capture language identifier (e.g., python, javascript)
-                var language = part.trim(); // Extract language from the first part of the regex capture group.
+                // Language for the code block
+                language = safePart;
+
             } else if (index % 3 === 2) {
-                // Code block part
+                // Code block content
                 const codeBlock = document.createElement("div");
                 codeBlock.classList.add("code-block-container");
+
+                // ADDED: Code block header
+                const codeBlockHeader = document.createElement("div");
+                codeBlockHeader.classList.add("code-block-header");
+                codeBlockHeader.textContent = language ? language : "Code";
+                codeBlock.appendChild(codeBlockHeader);
 
                 const codeElement = document.createElement("pre");
                 const codeContent = document.createElement("code");
 
-                // Set the appropriate language class if language was detected
                 if (language) {
                     codeContent.classList.add(`language-${language}`);
                 }
 
-                codeContent.textContent = part.trim(); // Add code inside <pre><code></code></pre>
+                codeContent.textContent = safePart;
                 codeElement.appendChild(codeContent);
 
-                // Initialize Highlight.js for the code block
                 hljs.highlightElement(codeContent);
 
-                // Create copy button for the code block
                 const codeCopyButton = document.createElement("span");
                 codeCopyButton.classList.add("material-symbols-rounded", "code-copy-button");
                 codeCopyButton.textContent = "content_copy";
 
-                // Bind the copy event right after appending the code
                 codeCopyButton.addEventListener("click", () => {
-                    navigator.clipboard.writeText(part.trim()).then(() => {
+                    navigator.clipboard.writeText(safePart).then(() => {
                         codeCopyButton.textContent = "done";
                         setTimeout(() => {
                             codeCopyButton.textContent = "content_copy";
@@ -255,17 +569,18 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeBlock.appendChild(codeElement);
                 codeBlock.appendChild(codeCopyButton);
                 messageBody.appendChild(codeBlock);
-                entireMessage += `\n\n${part.trim()}`;
+                entireMessage += `\n\n${safePart}`;
             }
         });
 
-        // Handle the loading state if necessary
         if (isLoading) {
+            // Show loading dots
             const loadingDots = document.createElement("div");
             loadingDots.classList.add("loading-dots");
             loadingDots.innerHTML = `<div></div><div></div><div></div>`;
             messageBody.appendChild(loadingDots);
         } else {
+            // Entire message copy button
             const copyButtonContainer = document.createElement("div");
             copyButtonContainer.classList.add("copy-button-container");
 
@@ -276,7 +591,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
             messageBody.appendChild(copyButtonContainer);
 
-            // Copy the entire message
             copyButton.addEventListener("click", () => {
                 navigator.clipboard.writeText(entireMessage).then(() => {
                     copyButton.textContent = "done";
@@ -287,11 +601,11 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             });
         }
 
-        // Add AI icon and message content to the final element
         messageContent.appendChild(aiIcon);
         messageContent.appendChild(messageBody);
+
     } else if (sender === "You") {
-        // User message handling with image support
+        // User message
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
@@ -302,29 +616,29 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             messageBody.appendChild(messageText);
         }
 
-        if (imageFile) {
-            const imageElement = document.createElement("img");
-            imageElement.src = URL.createObjectURL(imageFile);
-            imageElement.alt = "Uploaded Image";
-            imageElement.classList.add("uploaded-image");
-            messageBody.appendChild(imageElement);
-        }
-
         messageContent.appendChild(messageBody);
     }
 
     messageElement.appendChild(messageContent);
     chatBox.appendChild(messageElement);
-    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
+    chatBox.scrollTop = chatBox.scrollHeight;
 
-    return messageElement; // Return the element for further manipulation
+    // Dynamically typeset MathJax for the newly added message element
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([messageElement])
+            .catch(err => console.error("MathJax rendering failed:", err));
+    } else {
+        console.error("MathJax is not loaded or does not support typesetPromise.");
+    }
+
+    return messageElement;
 }
 
 function generateChatId() {
-    const sessionSecret = sessionStorage.getItem('sessionSecret') || 'defaultSecret2';  // Retrieve session secret or set a default
-    const randomNumber = Math.random().toString(36).substr(2, 9); 
-    return `${sessionSecret}_chat_${randomNumber}`; 
-}
+    const userId = sessionStorage.getItem('userId') || 'anonymous';
+    const randomNumber = Math.random().toString(36).substr(2, 9);
+    return `${userId}_chat_${randomNumber}`;
+  }
 
 let selectedImageFile = null;
 
@@ -335,69 +649,87 @@ fileUpload.addEventListener('change', async function () {
     if (fileUploadInProgress) return;  // Prevent multiple uploads
     fileUploadInProgress = true;
 
-    const file = fileUpload.files[0];
-    if (file) {
-        if (file.type.startsWith('image/')) {
-            // It's an image, store it for sending with the next message
-            selectedImageFile = file;
-
-            // Optionally, display the selected file in the chat
-            appendFileLink(file.name);
-
-            // Change the attach icon to 'done'
-            attachIcon.textContent = "done"; 
-
-            // Revert back to attach icon after 2 seconds
-            setTimeout(() => {
-                attachIcon.textContent = "attach_file";
-            }, 2000);
-
-            // Reset the file input
-            fileUpload.value = '';
-            fileUploadInProgress = false;  // Clear the upload flag
-        } else {
-            // Not an image, upload it immediately via /upload endpoint
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('chatId', chatId); // Ensure chatId is sent along with the file
-
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                if (response.ok) {
-                    // Change the attach icon to 'done'
-                    attachIcon.textContent = "done"; 
-                    
-                    // Revert back to attach icon after 2 seconds
-                    setTimeout(() => {
-                        attachIcon.textContent = "attach_file";
-                    }, 2000);
-
-                    // Since the server does not return a file URL, we can inform the user that the file was uploaded
-                    appendMessage('System', `File "${file.name}" uploaded successfully.`);
-
-                    // Optionally, you can also display the file name in the chat
-                    appendFileLink(file.name);
-                } else {
-                    const errorData = await response.json();
-                    console.error('Upload error:', errorData.error);
-                    appendMessage('System', `Error uploading file: ${errorData.error}`);
+    const files = fileUpload.files;
+    if (files.length > 0) {
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                // Check if the image type is supported
+                if (!isSupportedImageType(file)) {
+                    const fileExtension = getFileExtension(file.name);
+                    displayPopup(`Image type .${fileExtension} not supported`);
+                    continue;
                 }
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                appendMessage('System', 'An error occurred while uploading the file.');
-            } finally {
-                // Ensure that fileUpload is reset and the upload flag is cleared after processing
+
+                // It's a supported image, add it to the selectedImageFiles array
+                selectedImageFiles.push(file);
+
+                // Generate a blob URL for the image
+                const imageUrl = URL.createObjectURL(file);
+
+                // Display the image link in the chat
+                appendFileLink(file.name, imageUrl);
+
+                // Change the attach icon to 'done'
+                attachIcon.textContent = "done";
+
+                // Revert back to attach icon after 2 seconds
                 setTimeout(() => {
-                    fileUpload.value = '';  // Reset the file input, but with a delay to ensure upload completes
-                }, 100);  // Small delay to ensure the input reset doesn't cause interference
-                fileUploadInProgress = false;  // Clear the upload flag
+                    attachIcon.textContent = "attach_file";
+                }, 2000);
+
+                // Reset the file input
+                fileUpload.value = '';
+            } else {
+                // Not an image, upload it immediately via /upload endpoint
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('chatId', chatId); // Ensure chatId is sent along with the file
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (response.ok) {
+                        // Change the attach icon to 'done'
+                        attachIcon.textContent = "done"; 
+                        
+                        // Revert back to attach icon after 2 seconds
+                        setTimeout(() => {
+                            attachIcon.textContent = "attach_file";
+                        }, 2000);
+
+                        // Inform the user that the file was uploaded
+                        appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                        const responseData = await response.json();
+                        const fileUrl = responseData.url || '#'; 
+                        appendFileLink(file.name, fileUrl);
+                    } else {
+                        const errorData = await response.json();
+                        console.error('Upload error:', errorData.error);
+                        appendMessage('System', `Error uploading file: ${errorData.error}`);
+
+                        if (errorData.error.includes('Unsupported file type')) {
+                            const fileExtension = getFileExtension(file.name);
+                            displayPopup(`Document type .${fileExtension} not supported`);
+                        } else {
+                            displayPopup(`Error uploading file: ${errorData.error}`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error uploading file:', error);
+                    appendMessage('System', 'An error occurred while uploading the file.');
+                } finally {
+                    setTimeout(() => {
+                        fileUpload.value = '';  
+                    }, 100);  
+                }
             }
         }
     }
+    fileUploadInProgress = false;  
 });
 
 function appendFileLink(fileName, fileUrl) {
@@ -405,69 +737,119 @@ function appendFileLink(fileName, fileUrl) {
     
     // Create a container for the file link
     const fileElement = document.createElement('div');
-    fileElement.classList.add('file-upload-container', 'user'); // Add 'user' class to align it with user messages
+    fileElement.classList.add('file-upload-container', 'user'); // Align with user messages
     
     const messageContent = document.createElement('div');
-    messageContent.classList.add('message-content'); // Apply message content styling
+    messageContent.classList.add('message-content'); // Will flex items in a row
 
-    // File link element
-    const fileLink = document.createElement('a');
-    fileLink.href = fileUrl;
-    fileLink.textContent = fileName;
-    fileLink.target = '_blank'; // Open in a new tab
-    fileLink.classList.add('file-link'); // Optional class for styling
+    // Determine if the file is an image based on its extension
+    const isImage = /\.(jpeg|jpg|gif|png|bmp|svg|tif|heic)$/i.test(fileName);
+
+    // Create a link to hold both the icon and file name
+    const fileIconLink = document.createElement('a');
+    fileIconLink.href = fileUrl || '#'; // Use '#' if no valid URL
+    fileIconLink.classList.add('file-link'); // Optional class for styling
+
+    // Decide which Material Icon to display
+    const fileIcon = document.createElement('span');
+    fileIcon.classList.add('material-symbols-rounded', 'file-icon');
+    fileIcon.textContent = isImage ? 'photo' : 'insert_drive_file';
+
+    // If it's an image, show in a modal on click
+    if (isImage && fileUrl) {
+        fileIconLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            showImageModal(fileUrl);
+        });
+        fileIconLink.style.cursor = 'pointer'; // Indicate clickability
+    } 
+    // Otherwise, open in a new tab
+    else if (fileUrl) {
+        fileIconLink.target = '_blank';
+    }
+
+    // Add the icon
+    fileIconLink.appendChild(fileIcon);
+
+    // Add the file name (shown between the icon and delete icon)
+    const fileNameSpan = document.createElement('span');
+    fileNameSpan.classList.add('file-name');
+    fileNameSpan.textContent = fileName;
+    fileIconLink.appendChild(fileNameSpan);
+
+    // Append the clickable link (icon + name) to the message
+    messageContent.appendChild(fileIconLink);
     
-    messageContent.appendChild(fileLink);
-    
-    // Create delete button
+    // Create the delete (bin) button
     const deleteButton = document.createElement('span');
     deleteButton.classList.add('material-symbols-rounded', 'delete-button');
     deleteButton.textContent = 'delete';
-    
-    // Add click event to delete the file message
+    deleteButton.title = 'Delete this file message';
+
+    // Clicking the bin removes the entire file message
     deleteButton.addEventListener('click', () => {
-        chatBox.removeChild(fileElement); // Remove the file message from the chat
+        chatBox.removeChild(fileElement);
     });
 
+    // Add delete button to the message
     messageContent.appendChild(deleteButton);
+
+    // Combine all into the final element in the chat
     fileElement.appendChild(messageContent);
     chatBox.appendChild(fileElement);
-    
-    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
+
+    // Scroll to the bottom to reveal the newly added file
+    chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 const sidebar = document.getElementById('sidebar');
 
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
+    const chatBox = document.getElementById('chat-box');
     const collapseBtn = document.getElementById('collapse-btn');
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
     const chatWindow = document.querySelector('.chat-window');
     const tutorModeButton = document.getElementById('tutor-mode-button');
-    const iconContainer = document.querySelector('.icon-container'); // Get the icon-container
+    const iconContainer = document.querySelector('.icon-container');
+    const inputContainer = document.querySelector('.input-container');
+    const inputBackground = document.querySelector('.input-background');
 
     if (sidebar.classList.contains('collapsed')) {
+        // Sidebar is currently collapsed, so let's expand it
         sidebar.classList.remove('collapsed');
+        chatBox.classList.remove('collapsed');
         collapseBtn.textContent = 'left_panel_close';
         chatWindow.classList.remove('collapsed');
+        inputContainer.classList.remove('collapsed');
+        iconContainer.classList.remove('collapsed');
+        inputBackground.classList.remove('collapsed');
 
-        // Add 'active' class to icons and icon-container when sidebar is open
+        document.body.classList.remove('no-chat-scroll'); // Remove class when expanded
+
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        tutorModeButton.classList.add('active');
+        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
+        inputBackground.classList.add('active');
     } else {
+        // Sidebar is currently expanded, so let's collapse it
         sidebar.classList.add('collapsed');
+        chatBox.classList.add('collapsed');
         collapseBtn.textContent = 'left_panel_open';
         chatWindow.classList.add('collapsed');
+        inputContainer.classList.add('collapsed');
+        iconContainer.classList.add('collapsed');
+        inputBackground.classList.add('collapsed');
 
-        // Remove 'active' class from icons and icon-container when sidebar is closed
+        document.body.classList.add('no-chat-scroll'); // Add class when collapsed
+
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        tutorModeButton.classList.remove('active');
+        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -477,22 +859,33 @@ function initializeActiveState() {
     const collapseBtn = document.getElementById('collapse-btn');
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
-    const tutorModeButton = document.getElementById('tutor-mode-button');
+    //const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
+
+    iconContainer.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            // Move focus to the first chatItem
+            const firstChatItem = document.querySelector('.chat-item');
+            if (firstChatItem) {
+                firstChatItem.focus();
+            }
+        }
+    });
 
     if (!sidebar.classList.contains('collapsed')) {
         // Sidebar is open, add 'active' class to icons and icon-container
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        tutorModeButton.classList.add('active');
+        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
     } else {
         // Sidebar is collapsed, remove 'active' class from icons and icon-container
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        tutorModeButton.classList.remove('active');
+        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -501,56 +894,148 @@ function initializeActiveState() {
 document.addEventListener('DOMContentLoaded', () => {
     initializeActiveState();
     loadChatHistory(); // Load chat history on page load
+
+       // Add keyboard accessibility for the collapse button
+       const collapseBtn = document.getElementById('collapse-btn');
+       collapseBtn.addEventListener('keydown', function(event) {
+           if (event.key === 'Enter' || event.key === ' ') {
+               event.preventDefault();
+               toggleSidebar();
+           }
+       });
+   
+       // Ensure dropdown items are focusable and can be activated via keyboard
+       dropdownItems.forEach(item => {
+           item.setAttribute('tabindex', '0');
+           item.addEventListener('keydown', function(event) {
+               if (event.key === 'Enter' || event.key === ' ') {
+                   event.preventDefault();
+                   this.click();
+               }
+           });
+       });
 });
 
 sendBtn.addEventListener('click', async () => {
     const message = chatInput.value.trim();
-    if (message || selectedImageFile) {
-        // Log current tutor mode before sending the message
+    if (message || selectedImageFiles.length > 0) {
         console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
 
-        // Hide the welcome screen if it's the first interaction
         if (isFirstInteraction) {
             hideWelcomeScreen();
-            isFirstInteraction = false; // Mark that the first interaction is done
+            isFirstInteraction = false;
         }
 
-        // Append the user's message to the chat, including the image if any
-        appendMessage('You', message, selectedImageFile);
+        // Append the user's message immediately
+        const userMessageElement = appendMessage('You', message);
 
-        chatInput.value = ''; // Clear the input value
-        sendBtn.classList.remove('active'); // Reset button state
-
-        // Append an empty message with loading dots for AI response
+        // Show AI loading message immediately
         const loadingMessageElement = appendMessage('AI', '', null, true);
 
+        chatInput.value = '';
+        sendBtn.classList.remove('active');
+
+        let response;
         try {
-            let response;
-            if (selectedImageFile) {
-                // Use sendMessageWithImage if an image is selected
-                response = await sendMessageWithImage(message, selectedImageFile);
-                selectedImageFile = null; // Reset the selected image after sending
+            if (selectedImageFiles.length > 0) {
+                response = await sendMessageWithImage(message, selectedImageFiles);
             } else {
-                // Use sendMessage if no image is selected
                 response = await sendMessage(message);
             }
-
-            const messageContent = loadingMessageElement.querySelector('.message-content');
-
-            // Remove the loading dots
-            const loadingDots = messageContent.querySelector('.loading-dots');
-            if (loadingDots) {
-                loadingDots.remove();
-            }
-
-            // Stream the raw AI response text
-            streamParsedResponse(messageContent, response);
-
-            // Update the chat history sidebar
-            loadChatHistory();
-
         } catch (error) {
             console.error('Error sending message:', error);
+        }
+
+        // If we hit a rate limit or there's no response (error)
+        if (response === null) {
+            // Remove the user's message and loading message
+            if (userMessageElement && userMessageElement.parentNode) {
+                userMessageElement.parentNode.removeChild(userMessageElement);
+            }
+            if (loadingMessageElement && loadingMessageElement.parentNode) {
+                loadingMessageElement.parentNode.removeChild(loadingMessageElement);
+            }
+            return;
+        }
+
+        // If we got a successful response, replace loading dots with streamed AI message
+        const messageContent = loadingMessageElement.querySelector('.message-content');
+        streamParsedResponse(messageContent, response);
+
+        loadChatHistory();
+    }
+});
+
+chatInput.addEventListener('keydown', async (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+
+        const message = chatInput.value.trim();
+
+        if (message || selectedImageFiles.length > 0) {
+            console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
+
+            if (isFirstInteraction) {
+                hideWelcomeScreen();
+                isFirstInteraction = false;
+            }
+
+            // Append the user's message immediately
+            const userMessageElement = appendMessage('You', message);
+
+            // Show AI loading message immediately
+            const loadingMessageElement = appendMessage('AI', '', null, true);
+
+            chatInput.value = '';
+            sendBtn.classList.remove('active');
+
+            setTimeout(() => {
+                resetInputHeight();
+            }, 0);
+
+            let response;
+            try {
+                if (selectedImageFiles.length > 0) {
+                    response = await sendMessageWithImage(message, selectedImageFiles);
+                } else {
+                    response = await sendMessage(message);
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+            }
+
+            // If we hit a rate limit or there's no response
+            if (response === null) {
+                // Remove the user's message and loading message
+                if (userMessageElement && userMessageElement.parentNode) {
+                    userMessageElement.parentNode.removeChild(userMessageElement);
+                }
+                if (loadingMessageElement && loadingMessageElement.parentNode) {
+                    loadingMessageElement.parentNode.removeChild(loadingMessageElement);
+                }
+                return;
+            }
+
+            // If we got a successful response, handle AI message streaming
+            if (response) {
+                const messageContent = loadingMessageElement.querySelector('.message-content');
+                streamParsedResponse(messageContent, response);
+                loadChatHistory();
+            } else {
+                console.error('Response is undefined.');
+            }
+        }
+    }
+});
+
+
+sendBtn.addEventListener('keydown', function(event) {
+    if (event.key === 'Tab' && !event.shiftKey) {
+        event.preventDefault();
+        // Move focus to the first chatItem
+        const firstChatItem = document.querySelector('.chat-item');
+        if (firstChatItem) {
+            firstChatItem.focus();
         }
     }
 });
@@ -575,12 +1060,19 @@ function streamMessageFromServer() {
 }
 
 function streamParsedResponse(messageContent, rawResponseText) {
-    const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
-    let currentWordIndex = 0;
-    let accumulatedText = ''; // To accumulate the words as they stream in
-
-    // Get the messageBody and ensure there's a messageText element
+    // Remove any loading dots if present
     const messageBody = messageContent.querySelector('.message-body');
+    if (!messageBody) {
+        console.error("Message body not found.");
+        return;
+    }
+
+    const loadingDots = messageBody.querySelector('.loading-dots');
+    if (loadingDots) {
+        loadingDots.remove();
+    }
+
+    // Create or select a messageText element to display the streaming text
     let messageText = messageBody.querySelector('.message-text');
     if (!messageText) {
         messageText = document.createElement('div');
@@ -588,91 +1080,183 @@ function streamParsedResponse(messageContent, rawResponseText) {
         messageBody.appendChild(messageText);
     }
 
+    // We'll stream the text as plain text first, then do a final parse at the end
+    messageText.textContent = ''; // Ensure empty at start of streaming
+
+    const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
+    let currentWordIndex = 0;
+    let accumulatedText = '';
+
+    const intervalSpeed = 10; // Faster interval for smoother streaming
+    const maxWordsPerChunk = 5; // Append a few words per iteration for even smoother streaming
+
     const wordInterval = setInterval(() => {
         if (currentWordIndex < words.length) {
-            accumulatedText += words[currentWordIndex];
-            currentWordIndex++;
+            // Append a few words each iteration for smoother streaming
+            const chunkEnd = Math.min(currentWordIndex + maxWordsPerChunk, words.length);
+            for (let i = currentWordIndex; i < chunkEnd; i++) {
+                accumulatedText += words[i];
+            }
+            currentWordIndex = chunkEnd;
 
-            // Update the messageText content
-            messageText.innerHTML = marked.parse(accumulatedText);
-
-            // Apply KaTeX rendering for LaTeX equations
-            renderMathInElement(messageText, {
-                delimiters: [
-                    { left: "$$", right: "$$", display: true },
-                    { left: "$", right: "$", display: false },
-                    { left: "\\[", right: "\\]", display: true },   // Added for block equations
-                    { left: "\\(", right: "\\)", display: false }   // Added for inline equations
-                ],
-                throwOnError: false
-            });
-
-            chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
+            // Update the textContent quickly (no markdown, just raw text now)
+            messageText.textContent = accumulatedText;
+            chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
         } else {
             clearInterval(wordInterval);
 
-            // After streaming is complete, re-render the message to handle code blocks
-            reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
+            // Streaming done, now we do the final parsing & formatting
+            finalizeResponseFormatting(messageBody, accumulatedText);
         }
-    }, 20); // Adjust the interval as needed for speed
+    }, intervalSpeed);
 }
 
-function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
-    // Clear the existing content
+function finalizeResponseFormatting(messageBody, rawResponseText) {
+    // Now parse markdown, handle code blocks, math, etc.
+    // Clear existing content
     messageBody.innerHTML = '';
 
-    let entireMessage = ''; // To store the entire message
+    reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
 
-    // Use regex to split the content into normal text and code blocks
-    const codeBlockRegex = /```([\s\S]*?)```/g;
-    const parts = rawResponseText.split(codeBlockRegex);
+    // After re-rendering, wrap any tables found:
+    const tables = messageBody.querySelectorAll('table');
+    tables.forEach((table, tIndex) => {
+        // Add classes to the table
+        table.classList.add('table', 'table-bordered');
 
-    parts.forEach((part, index) => {
-        if (index % 2 === 0) {
-            // Regular text part
+        // Create the container element
+        const tableContainer = document.createElement('div');
+        tableContainer.classList.add('table-responsive-container');
+
+        // Create the scrollable div
+        const scrollableDiv = document.createElement('div');
+        scrollableDiv.classList.add('table-responsive');
+        scrollableDiv.setAttribute('tabindex', '0');
+        scrollableDiv.setAttribute('role', 'region');
+
+        // Create the accessible message (visually hidden)
+        const accessibleMessage = document.createElement('span');
+        accessibleMessage.classList.add('accessible-message', 'visually-hidden');
+        accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+
+        // Create the swipe icon div
+        const swipeIcon = document.createElement('div');
+        swipeIcon.classList.add('svg-icon', 'swipe-icon');
+        swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+
+        // Insert the new structure before moving the table
+        const oldParent = table.parentNode;
+        oldParent.insertBefore(tableContainer, table);
+
+        // Now append the scrollable div and children to the container
+        tableContainer.appendChild(scrollableDiv);
+        tableContainer.appendChild(accessibleMessage);
+        tableContainer.appendChild(swipeIcon);
+
+        // Finally, move the table inside the scrollable div
+        scrollableDiv.appendChild(table);
+    });
+
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([messageBody])
+            .catch(err => console.error("MathJax rendering failed:", err));
+    }
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+
+function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
+    const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
+
+    function processTextWithMarkdownAndMath(text) {
+        const mathSegments = [];
+        let placeholderIndex = 0;
+
+        // Extract math segments, replace with placeholders
+        const textWithPlaceholders = text.replace(mathPattern, (match) => {
+            mathSegments.push(match);
+            return `%%%MATH${placeholderIndex++}%%%`;
+        });
+
+        // Convert markdown to HTML
+        const parsedHTML = marked.parse(textWithPlaceholders);
+
+        // Restore math segments
+        let finalHTML = parsedHTML;
+        mathSegments.forEach((segment, i) => {
+            finalHTML = finalHTML.replace(`%%%MATH${i}%%%`, segment);
+        });
+
+        return finalHTML;
+    }
+
+    // Clear existing content
+    messageBody.innerHTML = '';
+    let entireMessage = '';
+
+    const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
+
+    // Safely split text by code blocks
+    const parts = rawResponseText ? rawResponseText.split(codeBlockRegex) : [''];
+
+    for (let i = 0; i < parts.length; i++) {
+        const currentPart = parts[i] || '';
+
+        if (i % 3 === 0) {
+            // Regular text parts
+            const textToProcess = currentPart.trim();
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
 
-            // Parse the text with Markdown
-            const parsedText = marked.parse(part.trim());
-            messageText.innerHTML = parsedText;
+            const finalHTML = processTextWithMarkdownAndMath(textToProcess);
+            messageText.innerHTML = finalHTML;
 
-            // Apply KaTeX rendering for LaTeX equations
-            renderMathInElement(messageText, {
-                delimiters: [
-                    { left: "$$", right: "$$", display: true },
-                    { left: "$", right: "$", display: false },
-                    { left: "\\[", right: "\\]", display: true },   // Added for block equations
-                    { left: "\\(", right: "\\)", display: false }   // Added for inline equations
-                ],
-                throwOnError: false
+            // Basic table styling
+            const tables = messageText.querySelectorAll('table');
+            tables.forEach((table) => {
+                table.classList.add('table');
             });
 
             messageBody.appendChild(messageText);
-            entireMessage += part.trim();
-        } else {
-            // Code block part
+            entireMessage += textToProcess;
+
+        } else if (i % 3 === 1) {
+            // Language for the code block
+            var language = currentPart ? currentPart.trim() : '';
+
+        } else if (i % 3 === 2) {
+            // Code block content
+            const codeContentText = currentPart ? currentPart.trim() : '';
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
+            // ADDED: Code block header
+            const codeBlockHeader = document.createElement("div");
+            codeBlockHeader.classList.add("code-block-header");
+            codeBlockHeader.textContent = language ? language : "Code";
+            codeBlock.appendChild(codeBlockHeader);
+
             const codeElement = document.createElement('pre');
             const codeContent = document.createElement('code');
-            codeContent.textContent = part.trim();
+
+            if (language) {
+                codeContent.classList.add(`language-${language}`);
+            }
+
+            codeContent.textContent = codeContentText;
             codeElement.appendChild(codeContent);
 
-            // Initialize Highlight.js for the code block
             hljs.highlightElement(codeContent);
 
-            // Create copy button for the code block
             const codeCopyButton = document.createElement('span');
             codeCopyButton.classList.add('material-symbols-rounded', 'code-copy-button');
-            codeCopyButton.textContent = "content_copy";
+            codeCopyButton.textContent = 'content_copy';
 
             codeCopyButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(part.trim()).then(() => {
+                navigator.clipboard.writeText(codeContentText).then(() => {
                     codeCopyButton.textContent = 'done';
                     setTimeout(() => {
-                        codeCopyButton.textContent = "content_copy";
+                        codeCopyButton.textContent = 'content_copy';
                     }, 2000);
                 });
             });
@@ -680,33 +1264,38 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeBlock.appendChild(codeElement);
             codeBlock.appendChild(codeCopyButton);
             messageBody.appendChild(codeBlock);
-            entireMessage += `\n\n${part.trim()}`;
+            entireMessage += `\n\n${codeContentText}`;
         }
-    });
+    }
 
-    // Add copy button for the entire AI message
-    const copyButtonContainer = document.createElement("div");
-    copyButtonContainer.classList.add("copy-button-container");
+    // Entire message copy button
+    const copyButtonContainer = document.createElement('div');
+    copyButtonContainer.classList.add('copy-button-container');
 
-    const copyButton = document.createElement("span");
-    copyButton.classList.add("material-symbols-rounded", "copy-button");
-    copyButton.textContent = "content_copy";
+    const copyButton = document.createElement('span');
+    copyButton.classList.add('material-symbols-rounded', 'copy-button');
+    copyButton.textContent = 'content_copy';
     copyButtonContainer.appendChild(copyButton);
 
     messageBody.appendChild(copyButtonContainer);
 
-    // Copy the entire message
-    copyButton.addEventListener("click", () => {
+    copyButton.addEventListener('click', () => {
         navigator.clipboard.writeText(entireMessage).then(() => {
-            copyButton.textContent = "done";
+            copyButton.textContent = 'done';
             setTimeout(() => {
-                copyButton.textContent = "content_copy";
+                copyButton.textContent = 'content_copy';
             }, 2000);
         });
     });
+
+    // Typeset MathJax again
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([messageBody])
+            .catch(err => console.error("MathJax rendering failed:", err));
+    } else {
+        console.error("MathJax is not loaded or does not support typesetPromise.");
+    }
 }
-
-
 
 // Function to reset the input height after sending a message
 function resetInputHeight() {
@@ -728,6 +1317,7 @@ function autoGrowInput() {
     }
 }
 
+// Existing event listener for input event
 chatInput.addEventListener('input', () => {
     // Automatically grow the input field as the user types
     autoGrowInput();
@@ -740,64 +1330,16 @@ chatInput.addEventListener('input', () => {
     }
 });
 
-chatInput.addEventListener('keydown', async (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault(); // Prevent adding a new line
-
-        const message = chatInput.value.trim();
-
-        if (message || selectedImageFile) {
-            console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
-
-            if (isFirstInteraction) {
-                hideWelcomeScreen();
-                isFirstInteraction = false;
-            }
-
-            // Append the user's message to the chat
-            appendMessage('You', message || '');
-
-            chatInput.value = '';
-            sendBtn.classList.remove('active');
-
-            // Reset input height
-            setTimeout(() => {
-                resetInputHeight();
-            }, 0);
-
-            // Append an empty message with loading dots for AI
-            const loadingMessageElement = appendMessage('AI', '', true);
-
-            try {
-                let response;
-                if (selectedImageFile) {
-                    response = await sendMessageWithImage(message, selectedImageFile);
-                    selectedImageFile = null;
-                } else {
-                    response = await sendMessage(message);
-                }
-
-                const messageContent = loadingMessageElement.querySelector('.message-content');
-
-                // Remove the loading dots
-                const loadingDots = messageContent.querySelector('.loading-dots');
-                if (loadingDots) {
-                    loadingDots.remove();
-                }
-
-                // Stream the AI response
-                streamParsedResponse(messageContent, response);
-
-                // Update the chat history sidebar
-                loadChatHistory();
-
-            } catch (error) {
-                console.error('Error sending message:', error);
-            }
-        }
-    }
+// **Add these event listeners for focus and blur events**
+chatInput.addEventListener('focus', () => {
+    sendBtn.classList.add('active');
 });
 
+chatInput.addEventListener('blur', () => {
+    if (chatInput.value.trim() === '') {
+        sendBtn.classList.remove('active');
+    }
+});
 
 // Function to show the welcome screen
 function showWelcomeScreen() {
@@ -832,40 +1374,288 @@ function formatBytes(bytes, decimals = 2) {
 }
 
 // Function to handle sending message with optional image
-async function sendMessageWithImage(message, imageFile) {
+async function sendMessageWithImage(message, imageFiles) {
     const formData = new FormData();
     formData.append('message', message);
     formData.append('chatId', chatId);
     formData.append('tutorMode', isTutorModeOn);
 
-    if (imageFile) {
-        formData.append('image', imageFile);
+    // Append all selected images
+    for (const img of imageFiles) {
+        formData.append('image', img);
     }
 
-    const res = await fetch('/chat', {
-        method: 'POST',
-        body: formData,
+    try {
+        const res = await fetch('/chat', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
+        const data = await res.json();
+        updateImageStats(data.total_image_count, data.total_image_size);
+
+        return data.response;
+    } catch (error) {
+        console.error('Error sending message with images:', error);
+        throw error;
+    }
+}
+
+function renderMath() {
+    MathJax.typeset();
+}
+
+function appendFormula(formula) {
+    const chatBox = document.getElementById('chat-box');
+    const formulaContainer = document.createElement('div');
+    formulaContainer.className = 'display-formula';
+    formulaContainer.innerHTML = `$$${formula}$$`;
+
+    chatBox.appendChild(formulaContainer);
+    MathJax.typesetPromise(); // Re-render MathJax equations
+}
+
+let dragCounter = 0;
+
+function handleDragEnter(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    inputContainer.classList.add('dragover');
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Decrement the counter and only remove 'dragover' if it's zero
+    dragCounter--;
+    if (dragCounter === 0) {
+        inputContainer.classList.remove('dragover');
+    }
+}
+
+async function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0; // Reset counter on drop
+    inputContainer.classList.remove('dragover');
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        if (fileUploadInProgress) return;  // Prevent multiple uploads
+        fileUploadInProgress = true;
+
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                // Check if the image type is supported
+                if (!isSupportedImageType(file)) {
+                    const fileExtension = getFileExtension(file.name);
+                    displayPopup(`Image type .${fileExtension} not supported`);
+                    continue;
+                }
+
+                // It's a supported image, add it to the selectedImageFiles array
+                selectedImageFiles.push(file);
+
+                // Generate a blob URL for the image
+                const imageUrl = URL.createObjectURL(file);
+
+                // Display the image link in the chat
+                appendFileLink(file.name, imageUrl);
+
+                // Change the attach icon to 'done'
+                attachIcon.textContent = "done";
+
+                // Revert after 2 seconds
+                setTimeout(() => {
+                    attachIcon.textContent = "attach_file";
+                }, 2000);
+            } else {
+                // Not an image, upload it immediately via /upload endpoint
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('chatId', chatId); // Ensure chatId is sent along with the file
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (response.ok) {
+                        attachIcon.textContent = "done"; 
+                        setTimeout(() => {
+                            attachIcon.textContent = "attach_file";
+                        }, 2000);
+
+                        appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                        const responseData = await response.json();
+                        const fileUrl = responseData.url || '#';
+                        appendFileLink(file.name, fileUrl);
+                    } else {
+                        const errorData = await response.json();
+                        console.error('Upload error:', errorData.error);
+                        appendMessage('System', `Error uploading file: ${errorData.error}`);
+
+                        if (errorData.error.includes('Unsupported file type')) {
+                            const fileExtension = getFileExtension(file.name);
+                            displayPopup(`Document type .${fileExtension} not supported`);
+                        } else {
+                            displayPopup(`Error uploading file: ${errorData.error}`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error uploading file:', error);
+                    appendMessage('System', 'An error occurred while uploading the file.');
+                }
+            }
+        }
+        fileUploadInProgress = false;  
+    }
+}
+
+// Add event listeners for chat-title validation
+document.addEventListener("DOMContentLoaded", () => {
+    const chatTitleElements = document.querySelectorAll('.chat-title'); // Select all elements with the class 'chat-title'
+    chatTitleElements.forEach(chatTitle => {
+        chatTitle.addEventListener('input', () => validateChatTitle(chatTitle)); // Validate on input
     });
+});
 
-    const data = await res.json();
 
-    // You can access total_image_count and total_image_size here
-    console.log('Total Images:', data.total_image_count);
-    console.log('Total Image Size:', data.total_image_size);
-
-    // Optionally, update the UI with this information
-    updateImageStats(data.total_image_count, data.total_image_size);
-
-    return data.response;
+function deleteChat(chatId) {
+    fetch(`/chats/${chatId}`, {
+        method: 'DELETE',
+    })
+    .then(response => {
+        if (response.ok) {
+            // Reload the chat history to reflect the changes
+            loadChatHistory();
+        } else {
+            console.error('Failed to delete chat');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting chat:', error);
+    });
 }
 
 // Load the chat history when the page loads
 window.onload = async () => {
-    const response = await fetch('/session-secret');
-    const data = await response.json();
-    sessionStorage.setItem('sessionSecret', data.secret);  // Store session secret in sessionStorage
-    chatId = sessionStorage.getItem('chatId') || generateChatId();
-    sessionStorage.setItem('chatId', chatId);
-    loadChatHistory();  // Load chats that belong to the secret
-    showWelcomeScreen();
+    try {
+        const response = await fetch('/user-info', {
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        sessionStorage.setItem('userId', data.userId);
+        sessionStorage.setItem('userName', data.userName);
+
+        chatId = sessionStorage.getItem('chatId') || generateChatId();
+        sessionStorage.setItem('chatId', chatId);
+
+        loadChatHistory();  // Load chats that belong to the user
+        showWelcomeScreen();
+    } catch (error) {
+        console.error('Error fetching user info:', error);
+        window.location.href = '/login'; // Redirect to login on error
+    }
 };
+
+// Update the showWelcomeScreen function:
+function showWelcomeScreen() {
+    const welcomeContainer = document.getElementById('welcome-container');
+    const userName = sessionStorage.getItem('userName') || 'User';
+    welcomeContainer.style.display = 'block'; // Show the welcome screen
+    const welcomeMessage = welcomeContainer.querySelector('p');
+    welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
+}
+
+// === Modal Functions ===
+function createImageModal() {
+    // Check if the modal already exists
+    let modal = document.getElementById('image-modal');
+    if (modal) return modal;
+
+    // Create modal elements
+    modal = document.createElement('div');
+    modal.id = 'image-modal';
+
+    const modalContent = document.createElement('div');
+    modalContent.classList.add('modal-content');
+
+    const img = document.createElement('img');
+    img.id = 'modal-image';
+    img.alt = 'Image Preview';
+
+    const closeBtn = document.createElement('span');
+    closeBtn.classList.add('close-btn');
+    closeBtn.innerHTML = '&times;'; // Unicode multiplication sign
+
+    // Add click event to close the modal
+    closeBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+        // We do NOT revokeObjectURL here because we may need to show the same image again.
+        // If you do need to revoke, do so only when the image will never be displayed again.
+    });
+
+    // Close modal when clicking outside the image
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+            // Same note as above about revokeObjectURL.
+        }
+    });
+
+    // Assemble modal content
+    modalContent.appendChild(closeBtn);
+    modalContent.appendChild(img);
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    return modal;
+}
+
+// Function to display the modal with the specified image URL
+function showImageModal(imageUrl) {
+    const modal = createImageModal();
+    const modalImage = document.getElementById('modal-image');
+    modalImage.src = imageUrl;
+    modal.style.display = 'flex'; // Show the modal
+}
+
+
