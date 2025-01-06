@@ -350,6 +350,45 @@ function validateChatTitle(inputElement) {
     }
 }
 
+function createScrollTable(index, element) {
+    const root = element; // element is a DOM element, not a jQuery object
+    const icon = root.querySelector(".swipe-icon");
+    const table = root.querySelector(".table-responsive");
+    const accessibleMessage = root.querySelector(".accessible-message");
+
+    function setupAria(index, target) {
+        let label = "message-label-" + index;
+        target.setAttribute('id', label);
+        table.setAttribute('aria-labelledby', label);
+    }
+
+    function updateDOM() {
+        const hasScrollBar = table.scrollWidth > table.clientWidth;
+        const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+
+        if (hasScrollBar && isTouchDevice) {
+            icon.classList.remove("d-none");
+        } else {
+            icon.classList.add("d-none");
+        }
+    }
+
+    // Setup ARIA attributes initially
+    setupAria(index, accessibleMessage);
+
+    // Run updateDOM now
+    updateDOM();
+
+    // Listen for resize
+    window.addEventListener("resize", updateDOM);
+
+    // Return any methods or properties that need external access (optional)
+    return {
+        updateDOM,
+        setupAria
+    };
+}
+
 
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
@@ -407,7 +446,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const mathSegments = [];
         let placeholderIndex = 0;
 
-        // Extract math segments and replace them with placeholders
+        // Extract math segments and replace with placeholders
         const textWithPlaceholders = text.replace(mathPattern, (match) => {
             mathSegments.push(match);
             return `%%%MATH${placeholderIndex++}%%%`;
@@ -419,7 +458,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         // Restore math segments
         let finalHTML = parsedHTML;
         mathSegments.forEach((segment, i) => {
-            // Insert the original math segment back into the final HTML
             finalHTML = finalHTML.replace(`%%%MATH${i}%%%`, segment);
         });
 
@@ -441,30 +479,67 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
+        let language = ''; // Captures the language from the regex
+
         parts.forEach((part, index) => {
+            const safePart = (part || '').trim();
+
+            // Every 3rd part is either text or code based on index
             if (index % 3 === 0) {
                 // Regular text may contain markdown & math
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
-                const finalHTML = processTextWithMarkdownAndMath(part.trim());
+                const finalHTML = processTextWithMarkdownAndMath(safePart);
                 messageText.innerHTML = finalHTML;
 
-                // Add 'table' class to tables
+                // Wrap tables, if any
                 const tables = messageText.querySelectorAll('table');
-                tables.forEach(table => {
-                    table.classList.add('table');
+                tables.forEach((table, tIndex) => {
+                    table.classList.add('table', 'table-bordered');
+                    
+                    const tableContainer = document.createElement('div');
+                    tableContainer.classList.add('table-responsive-container');
+
+                    const scrollableDiv = document.createElement('div');
+                    scrollableDiv.classList.add('table-responsive');
+                    scrollableDiv.setAttribute('tabindex', '0');
+                    scrollableDiv.setAttribute('role', 'region');
+
+                    const accessibleMessage = document.createElement('span');
+                    accessibleMessage.classList.add('accessible-message', 'visually-hidden');
+                    accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+
+                    const swipeIcon = document.createElement('div');
+                    swipeIcon.classList.add('svg-icon', 'swipe-icon');
+                    swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+
+                    const oldParent = table.parentNode;
+                    oldParent.insertBefore(tableContainer, table);
+
+                    tableContainer.appendChild(scrollableDiv);
+                    tableContainer.appendChild(accessibleMessage);
+                    tableContainer.appendChild(swipeIcon);
+                    scrollableDiv.appendChild(table);
                 });
 
                 messageBody.appendChild(messageText);
-                entireMessage += part.trim();
+                entireMessage += safePart;
+
             } else if (index % 3 === 1) {
                 // Language for the code block
-                var language = part.trim();
+                language = safePart;
+
             } else if (index % 3 === 2) {
                 // Code block content
                 const codeBlock = document.createElement("div");
                 codeBlock.classList.add("code-block-container");
+
+                // ADDED: Code block header
+                const codeBlockHeader = document.createElement("div");
+                codeBlockHeader.classList.add("code-block-header");
+                codeBlockHeader.textContent = language ? language : "Code";
+                codeBlock.appendChild(codeBlockHeader);
 
                 const codeElement = document.createElement("pre");
                 const codeContent = document.createElement("code");
@@ -473,7 +548,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                     codeContent.classList.add(`language-${language}`);
                 }
 
-                codeContent.textContent = part.trim();
+                codeContent.textContent = safePart;
                 codeElement.appendChild(codeContent);
 
                 hljs.highlightElement(codeContent);
@@ -483,7 +558,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeCopyButton.textContent = "content_copy";
 
                 codeCopyButton.addEventListener("click", () => {
-                    navigator.clipboard.writeText(part.trim()).then(() => {
+                    navigator.clipboard.writeText(safePart).then(() => {
                         codeCopyButton.textContent = "done";
                         setTimeout(() => {
                             codeCopyButton.textContent = "content_copy";
@@ -494,17 +569,18 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeBlock.appendChild(codeElement);
                 codeBlock.appendChild(codeCopyButton);
                 messageBody.appendChild(codeBlock);
-                entireMessage += `\n\n${part.trim()}`;
+                entireMessage += `\n\n${safePart}`;
             }
         });
 
-        // Handle loading or add copy button for entire AI message
         if (isLoading) {
+            // Show loading dots
             const loadingDots = document.createElement("div");
             loadingDots.classList.add("loading-dots");
             loadingDots.innerHTML = `<div></div><div></div><div></div>`;
             messageBody.appendChild(loadingDots);
         } else {
+            // Entire message copy button
             const copyButtonContainer = document.createElement("div");
             copyButtonContainer.classList.add("copy-button-container");
 
@@ -539,14 +615,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             messageText.textContent = message;
             messageBody.appendChild(messageText);
         }
-
-        // if (imageFile) {
-        //     const imageElement = document.createElement("img");
-        //     imageElement.src = URL.createObjectURL(imageFile);
-        //     imageElement.alt = "Uploaded Image";
-        //     imageElement.classList.add("uploaded-image");
-        //     messageBody.appendChild(imageElement);
-        // }
 
         messageContent.appendChild(messageBody);
     }
@@ -672,47 +740,66 @@ function appendFileLink(fileName, fileUrl) {
     fileElement.classList.add('file-upload-container', 'user'); // Align with user messages
     
     const messageContent = document.createElement('div');
-    messageContent.classList.add('message-content'); // Apply message content styling
-
-    // File link element
-    const fileLink = document.createElement('a');
-    fileLink.href = fileUrl || '#'; // Use '#' if fileUrl is not provided
-    fileLink.textContent = fileName;
-    fileLink.classList.add('file-link'); // Optional class for styling
+    messageContent.classList.add('message-content'); // Will flex items in a row
 
     // Determine if the file is an image based on its extension
     const isImage = /\.(jpeg|jpg|gif|png|bmp|svg|tif|heic)$/i.test(fileName);
 
+    // Create a link to hold both the icon and file name
+    const fileIconLink = document.createElement('a');
+    fileIconLink.href = fileUrl || '#'; // Use '#' if no valid URL
+    fileIconLink.classList.add('file-link'); // Optional class for styling
+
+    // Decide which Material Icon to display
+    const fileIcon = document.createElement('span');
+    fileIcon.classList.add('material-symbols-rounded', 'file-icon');
+    fileIcon.textContent = isImage ? 'photo' : 'insert_drive_file';
+
+    // If it's an image, show in a modal on click
     if (isImage && fileUrl) {
-        // It's an image, attach event listener to open in modal
-        fileLink.addEventListener('click', (e) => {
+        fileIconLink.addEventListener('click', (e) => {
             e.preventDefault();
             showImageModal(fileUrl);
         });
-        fileLink.style.cursor = 'pointer'; // Indicate that it's clickable
-    } else if (fileUrl) {
-        // For non-image files, keep the default behavior
-        fileLink.target = '_blank'; // Open in a new tab
+        fileIconLink.style.cursor = 'pointer'; // Indicate clickability
+    } 
+    // Otherwise, open in a new tab
+    else if (fileUrl) {
+        fileIconLink.target = '_blank';
     }
 
-    messageContent.appendChild(fileLink);
+    // Add the icon
+    fileIconLink.appendChild(fileIcon);
+
+    // Add the file name (shown between the icon and delete icon)
+    const fileNameSpan = document.createElement('span');
+    fileNameSpan.classList.add('file-name');
+    fileNameSpan.textContent = fileName;
+    fileIconLink.appendChild(fileNameSpan);
+
+    // Append the clickable link (icon + name) to the message
+    messageContent.appendChild(fileIconLink);
     
-    // Create delete button
+    // Create the delete (bin) button
     const deleteButton = document.createElement('span');
     deleteButton.classList.add('material-symbols-rounded', 'delete-button');
     deleteButton.textContent = 'delete';
     deleteButton.title = 'Delete this file message';
 
-    // Add click event to delete the file message
+    // Clicking the bin removes the entire file message
     deleteButton.addEventListener('click', () => {
-        chatBox.removeChild(fileElement); // Remove the file message from the chat
+        chatBox.removeChild(fileElement);
     });
 
+    // Add delete button to the message
     messageContent.appendChild(deleteButton);
+
+    // Combine all into the final element in the chat
     fileElement.appendChild(messageContent);
     chatBox.appendChild(fileElement);
-    
-    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
+
+    // Scroll to the bottom to reveal the newly added file
+    chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 const sidebar = document.getElementById('sidebar');
@@ -727,6 +814,7 @@ function toggleSidebar() {
     const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
     const inputContainer = document.querySelector('.input-container');
+    const inputBackground = document.querySelector('.input-background');
 
     if (sidebar.classList.contains('collapsed')) {
         // Sidebar is currently collapsed, so let's expand it
@@ -736,14 +824,16 @@ function toggleSidebar() {
         chatWindow.classList.remove('collapsed');
         inputContainer.classList.remove('collapsed');
         iconContainer.classList.remove('collapsed');
+        inputBackground.classList.remove('collapsed');
 
         document.body.classList.remove('no-chat-scroll'); // Remove class when expanded
 
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        tutorModeButton.classList.add('active');
+        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
+        inputBackground.classList.add('active');
     } else {
         // Sidebar is currently expanded, so let's collapse it
         sidebar.classList.add('collapsed');
@@ -752,13 +842,14 @@ function toggleSidebar() {
         chatWindow.classList.add('collapsed');
         inputContainer.classList.add('collapsed');
         iconContainer.classList.add('collapsed');
+        inputBackground.classList.add('collapsed');
 
         document.body.classList.add('no-chat-scroll'); // Add class when collapsed
 
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        tutorModeButton.classList.remove('active');
+        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -768,7 +859,7 @@ function initializeActiveState() {
     const collapseBtn = document.getElementById('collapse-btn');
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
-    const tutorModeButton = document.getElementById('tutor-mode-button');
+    //const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
 
     iconContainer.addEventListener('keydown', function(event) {
@@ -787,14 +878,14 @@ function initializeActiveState() {
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        tutorModeButton.classList.add('active');
+        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
     } else {
         // Sidebar is collapsed, remove 'active' class from icons and icon-container
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        tutorModeButton.classList.remove('active');
+        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -1021,19 +1112,58 @@ function streamParsedResponse(messageContent, rawResponseText) {
 }
 
 function finalizeResponseFormatting(messageBody, rawResponseText) {
-    // Now parse markdown, handle code blocks, math, etc., all at once for smooth finalization
+    // Now parse markdown, handle code blocks, math, etc.
     // Clear existing content
     messageBody.innerHTML = '';
 
-    // Use the existing reRenderMessageWithCodeBlocks function but slightly adjust it
-    // to handle the final formatting in one go.
     reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
 
+    // After re-rendering, wrap any tables found:
+    const tables = messageBody.querySelectorAll('table');
+    tables.forEach((table, tIndex) => {
+        // Add classes to the table
+        table.classList.add('table', 'table-bordered');
+
+        // Create the container element
+        const tableContainer = document.createElement('div');
+        tableContainer.classList.add('table-responsive-container');
+
+        // Create the scrollable div
+        const scrollableDiv = document.createElement('div');
+        scrollableDiv.classList.add('table-responsive');
+        scrollableDiv.setAttribute('tabindex', '0');
+        scrollableDiv.setAttribute('role', 'region');
+
+        // Create the accessible message (visually hidden)
+        const accessibleMessage = document.createElement('span');
+        accessibleMessage.classList.add('accessible-message', 'visually-hidden');
+        accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+
+        // Create the swipe icon div
+        const swipeIcon = document.createElement('div');
+        swipeIcon.classList.add('svg-icon', 'swipe-icon');
+        swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+
+        // Insert the new structure before moving the table
+        const oldParent = table.parentNode;
+        oldParent.insertBefore(tableContainer, table);
+
+        // Now append the scrollable div and children to the container
+        tableContainer.appendChild(scrollableDiv);
+        tableContainer.appendChild(accessibleMessage);
+        tableContainer.appendChild(swipeIcon);
+
+        // Finally, move the table inside the scrollable div
+        scrollableDiv.appendChild(table);
+    });
+
     if (window.MathJax && MathJax.typesetPromise) {
-        MathJax.typesetPromise([messageBody]).catch((err) => console.error("MathJax rendering failed:", err));
+        MathJax.typesetPromise([messageBody])
+            .catch(err => console.error("MathJax rendering failed:", err));
     }
     chatBox.scrollTop = chatBox.scrollHeight;
 }
+
 
 function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
@@ -1042,13 +1172,16 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         const mathSegments = [];
         let placeholderIndex = 0;
 
+        // Extract math segments, replace with placeholders
         const textWithPlaceholders = text.replace(mathPattern, (match) => {
             mathSegments.push(match);
             return `%%%MATH${placeholderIndex++}%%%`;
         });
 
+        // Convert markdown to HTML
         const parsedHTML = marked.parse(textWithPlaceholders);
 
+        // Restore math segments
         let finalHTML = parsedHTML;
         mathSegments.forEach((segment, i) => {
             finalHTML = finalHTML.replace(`%%%MATH${i}%%%`, segment);
@@ -1057,30 +1190,51 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         return finalHTML;
     }
 
+    // Clear existing content
     messageBody.innerHTML = '';
     let entireMessage = '';
 
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
-    const parts = rawResponseText.split(codeBlockRegex);
+
+    // Safely split text by code blocks
+    const parts = rawResponseText ? rawResponseText.split(codeBlockRegex) : [''];
 
     for (let i = 0; i < parts.length; i++) {
+        const currentPart = parts[i] || '';
+
         if (i % 3 === 0) {
+            // Regular text parts
+            const textToProcess = currentPart.trim();
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
-            const finalHTML = processTextWithMarkdownAndMath(parts[i].trim());
+
+            const finalHTML = processTextWithMarkdownAndMath(textToProcess);
             messageText.innerHTML = finalHTML;
 
+            // Basic table styling
             const tables = messageText.querySelectorAll('table');
-            tables.forEach(table => table.classList.add('table'));
+            tables.forEach((table) => {
+                table.classList.add('table');
+            });
 
             messageBody.appendChild(messageText);
-            entireMessage += parts[i].trim();
+            entireMessage += textToProcess;
 
         } else if (i % 3 === 1) {
-            var language = parts[i].trim();
+            // Language for the code block
+            var language = currentPart ? currentPart.trim() : '';
+
         } else if (i % 3 === 2) {
+            // Code block content
+            const codeContentText = currentPart ? currentPart.trim() : '';
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
+
+            // ADDED: Code block header
+            const codeBlockHeader = document.createElement("div");
+            codeBlockHeader.classList.add("code-block-header");
+            codeBlockHeader.textContent = language ? language : "Code";
+            codeBlock.appendChild(codeBlockHeader);
 
             const codeElement = document.createElement('pre');
             const codeContent = document.createElement('code');
@@ -1089,7 +1243,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
                 codeContent.classList.add(`language-${language}`);
             }
 
-            codeContent.textContent = parts[i].trim();
+            codeContent.textContent = codeContentText;
             codeElement.appendChild(codeContent);
 
             hljs.highlightElement(codeContent);
@@ -1099,7 +1253,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeCopyButton.textContent = 'content_copy';
 
             codeCopyButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(parts[i].trim()).then(() => {
+                navigator.clipboard.writeText(codeContentText).then(() => {
                     codeCopyButton.textContent = 'done';
                     setTimeout(() => {
                         codeCopyButton.textContent = 'content_copy';
@@ -1110,10 +1264,11 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeBlock.appendChild(codeElement);
             codeBlock.appendChild(codeCopyButton);
             messageBody.appendChild(codeBlock);
-            entireMessage += `\n\n${parts[i].trim()}`;
+            entireMessage += `\n\n${codeContentText}`;
         }
     }
 
+    // Entire message copy button
     const copyButtonContainer = document.createElement('div');
     copyButtonContainer.classList.add('copy-button-container');
 
@@ -1133,6 +1288,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         });
     });
 
+    // Typeset MathJax again
     if (window.MathJax && MathJax.typesetPromise) {
         MathJax.typesetPromise([messageBody])
             .catch(err => console.error("MathJax rendering failed:", err));

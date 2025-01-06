@@ -142,22 +142,33 @@ async function getUserInfo(req, res, next) {
     }
 }
 
-function ensureAuthenticated(req, res, next) {
-    if (req.user && req.user.email) return next();
+async function ensureAuthenticated(req, res, next) {
+    try {
+        if (req.user && req.user.email) {
+            // User is authenticated
+            return next();
+        }
 
-    // Handle unauthenticated access
-    if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
-        return res.status(401).json({ error: 'Unauthorized' });
-    } else if (isDevelopment) {
-        // In development, simulate authentication
-        req.user = {
-            email: 'JSerpis@delta.kaplaninc.com',
-            name: 'Josh Serpis',
-            userRoles: ['authenticated'],
-        };
-        return next();
-    } else {
-        return res.redirect('/login');
+        // Handle unauthenticated access based on request type and environment
+        if (req.xhr || req.headers['x-requested-with'] === 'XMLHttpRequest') {
+            // For AJAX requests, respond with a 401 Unauthorized status
+            return res.status(401).json({ error: 'Unauthorized' });
+        } else if (isDevelopment) {
+            // In development mode, simulate authentication
+            req.user = {
+                email: 'JSerpis@delta.kaplaninc.com',
+                name: 'Josh Serpis',
+                userRoles: ['authenticated'],
+            };
+            return next();
+        } else {
+            // In production, redirect unauthenticated users to the login page
+            return res.redirect('/login');
+        }
+    } catch (error) {
+        console.error('Error in ensureAuthenticated middleware:', error);
+        // Pass the error to the next middleware/error handler
+        return next(error);
     }
 }
 
@@ -177,7 +188,11 @@ if (isDevelopment) {
         next();
     });
 } else {
+    // ========================================
+    // Apply Authentication Middleware in Production
+    // ========================================
     app.use(getUserInfo);
+    app.use(ensureAuthenticated);
 }
 
 // ========================================
@@ -221,18 +236,11 @@ function categorizeChat(timestamp) {
 // Routes
 // ========================================
 
-/**
- * Returns session secret or user display name
- */
 app.get('/session-secret', (req, res) => {
     res.json({ secret: req.user ? req.user.displayName : 'Not authenticated' });
 });
 
-/**
- * File Upload Endpoint
- * Extracts file content and updates chat document in Cosmos DB
- */
-app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res) => {
+app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
     const { chatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
@@ -338,11 +346,7 @@ app.post('/upload', upload.single('file'), ensureAuthenticated, async (req, res)
     }
 });
 
-/**
- * Chat Endpoint
- * Interacts with OpenAI and returns AI responses
- */
-app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) => {
+app.post('/chat', upload.array('image'), async (req, res) => {
     const { message, tutorMode, chatId: providedChatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
@@ -460,6 +464,7 @@ app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) =
     const payload = {
         model: 'gpt-4o',
         messages: messages,
+        temperature: 0.7,
     };
 
     const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
@@ -542,11 +547,7 @@ app.post('/chat', upload.array('image'), ensureAuthenticated, async (req, res) =
     });
 });
 
-
-/**
- * Retrieve all chats for the authenticated user, categorized by date
- */
-app.get('/chats', ensureAuthenticated, async (req, res) => {
+app.get('/chats', async (req, res) => {
     try {
         const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
@@ -575,10 +576,7 @@ app.get('/chats', ensureAuthenticated, async (req, res) => {
     }
 });
 
-/**
- * Retrieve a specific chat history
- */
-app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
+app.get('/chats/:chatId', async (req, res) => {
     const { chatId } = req.params;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
@@ -596,9 +594,6 @@ app.get('/chats/:chatId', ensureAuthenticated, async (req, res) => {
     }
 });
 
-/**
- * Update chat visibility to "not visible"
- */
 app.delete('/chats/:chatId', async (req, res) => {
     const { chatId } = req.params;
     try {
@@ -614,9 +609,6 @@ app.delete('/chats/:chatId', async (req, res) => {
     }
 });
 
-/**
- * Delete old chat fields (older than 90 days)
- */
 async function deleteOldChats() {
     try {
         const querySpec = { query: 'SELECT * FROM c' };
@@ -643,9 +635,7 @@ async function deleteOldChats() {
 deleteOldChats();
 setInterval(deleteOldChats, 24 * 60 * 60 * 1000);
 
-// ========================================
-// Auth Routes for Development & Production
-// ========================================
+// Auth Routes
 if (isDevelopment) {
     app.get('/login', (req, res) => {
         req.user = { userId: 'test-user-id', userDetails: 'Josh Serpis', userRoles: ['authenticated'] };
@@ -661,10 +651,7 @@ if (isDevelopment) {
     app.get('/logout', (req, res) => res.redirect('/.auth/logout'));
 }
 
-/**
- * Returns user info
- */
-app.get('/user-info', ensureAuthenticated, (req, res) => {
+app.get('/user-info', (req, res) => {
     const userId = req.user.email;
     const userName = req.user.name || 'User';
     res.json({ userId, userName });
@@ -682,4 +669,3 @@ app.use((req, res, next) => {
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
-
