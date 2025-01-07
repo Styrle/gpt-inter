@@ -1195,15 +1195,17 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     let entireMessage = '';
 
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
-
     // Safely split text by code blocks
     const parts = rawResponseText ? rawResponseText.split(codeBlockRegex) : [''];
+
+    // Track language for code blocks
+    let language = '';
 
     for (let i = 0; i < parts.length; i++) {
         const currentPart = parts[i] || '';
 
         if (i % 3 === 0) {
-            // Regular text parts
+            // Regular text
             const textToProcess = currentPart.trim();
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
@@ -1211,18 +1213,18 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const finalHTML = processTextWithMarkdownAndMath(textToProcess);
             messageText.innerHTML = finalHTML;
 
-            // Basic table styling
+            // Example: add .table class
             const tables = messageText.querySelectorAll('table');
             tables.forEach((table) => {
-                table.classList.add('table');
+                table.classList.add('table'); 
             });
 
             messageBody.appendChild(messageText);
             entireMessage += textToProcess;
 
         } else if (i % 3 === 1) {
-            // Language for the code block
-            var language = currentPart ? currentPart.trim() : '';
+            // Possible language specified
+            language = currentPart ? currentPart.trim() : '';
 
         } else if (i % 3 === 2) {
             // Code block content
@@ -1230,10 +1232,10 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
-            // ADDED: Code block header
-            const codeBlockHeader = document.createElement("div");
-            codeBlockHeader.classList.add("code-block-header");
-            codeBlockHeader.textContent = language ? language : "Code";
+            // Code block header
+            const codeBlockHeader = document.createElement('div');
+            codeBlockHeader.classList.add('code-block-header');
+            codeBlockHeader.textContent = language ? language : 'Code';
             codeBlock.appendChild(codeBlockHeader);
 
             const codeElement = document.createElement('pre');
@@ -1246,8 +1248,10 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeContent.textContent = codeContentText;
             codeElement.appendChild(codeContent);
 
+            // Highlight.js
             hljs.highlightElement(codeContent);
 
+            // Inline copy button for code
             const codeCopyButton = document.createElement('span');
             codeCopyButton.classList.add('material-symbols-rounded', 'code-copy-button');
             codeCopyButton.textContent = 'content_copy';
@@ -1268,27 +1272,56 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         }
     }
 
-    // Entire message copy button
+    // === Entire message copy button ===
     const copyButtonContainer = document.createElement('div');
     copyButtonContainer.classList.add('copy-button-container');
 
     const copyButton = document.createElement('span');
     copyButton.classList.add('material-symbols-rounded', 'copy-button');
     copyButton.textContent = 'content_copy';
-    copyButtonContainer.appendChild(copyButton);
 
+    copyButtonContainer.appendChild(copyButton);
     messageBody.appendChild(copyButtonContainer);
 
-    copyButton.addEventListener('click', () => {
-        navigator.clipboard.writeText(entireMessage).then(() => {
+    // Click => copy entire message, preserving HTML if a table is present
+    copyButton.addEventListener('click', async () => {
+        try {
+          const tableElement = messageBody.querySelector('table');
+      
+          if (tableElement) {
+            // 1) The entire rendered HTML:
+            const htmlString = messageBody.innerHTML;
+      
+            // 2) Create a Blob for HTML, and another for text fallback
+            const htmlBlob = new Blob([htmlString], { type: 'text/html' });
+            const textBlob = new Blob([htmlString], { type: 'text/plain' });
+      
+            // 3) Construct a multi-part ClipboardItem
+            const clipboardItems = [
+              new ClipboardItem({
+                'text/html': htmlBlob,
+                'text/plain': textBlob,
+              })
+            ];
+      
+            // 4) Write to the clipboard
+            await navigator.clipboard.write(clipboardItems);
+      
             copyButton.textContent = 'done';
-            setTimeout(() => {
-                copyButton.textContent = 'content_copy';
-            }, 2000);
-        });
-    });
+            setTimeout(() => copyButton.textContent = 'content_copy', 2000);
+      
+          } else {
+            // If no table, just copy text
+            // e.g., old fallback
+            const plainText = messageBody.innerText;
+            await navigator.clipboard.writeText(plainText);
+          }
+        } catch (err) {
+          console.error('Error copying:', err);
+        }
+      });
 
-    // Typeset MathJax again
+    // Typeset MathJax again if available
     if (window.MathJax && MathJax.typesetPromise) {
         MathJax.typesetPromise([messageBody])
             .catch(err => console.error("MathJax rendering failed:", err));
