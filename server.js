@@ -5,8 +5,8 @@ require('dotenv').config();
 
 const express = require('express');
 const session = require('express-session');
-const RedisStore = require('connect-redis')(session);
-const { createClient } = require('ioredis');
+const { RedisStore } = require('connect-redis');
+const { createClient } = require('redis');
 const multer = require('multer');
 const { OpenAI } = require('openai');
 const fs = require('fs');
@@ -52,31 +52,32 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ========================================
 // Setup Redis Connection
 // ========================================
-// Example: Use environment variables from your Azure Cache for Redis
-// e.g., REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
+
 const redisClient = createClient({
-    host: process.env.REDIS_HOST,  
-    port: process.env.REDIS_PORT || 6380,
+    socket: {
+      host: process.env.REDIS_HOST,
+      port: process.env.REDIS_PORT || 6380,
+      tls: true // if your Azure Redis requires TLS
+    },
     password: process.env.REDIS_PASSWORD,
-    tls: { servername: process.env.REDIS_HOST },
-});
-  
-  // If you want to handle errors, add:
-  redisClient.on('error', (err) => console.error('Redis Client Error', err));
+  });
   redisClient.connect().catch(console.error);
+  
+  // 3) Create an instance of the new store
+  const store = new RedisStore({ client: redisClient });
   
   // ========================================
   // Middleware: Session with Redis Store
   // ========================================
   app.use(session({
-    store: new RedisStore({ client: redisClient }),
+    store,
     secret: process.env.SESSION_SECRET || 'defaultSecret3',
     resave: false,
     saveUninitialized: false,
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, 
+      maxAge: 24 * 60 * 60 * 1000,
     },
   }));
 
