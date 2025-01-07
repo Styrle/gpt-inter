@@ -378,6 +378,13 @@ ul.chat-category-list {
     margin-right: 10px;
 }
 
+.message.ai .message-body {
+    display: flex;
+    flex-direction: column; 
+    flex: 1; 
+    min-width: 0;      
+}
+
 .user .message-content .message-body .message-text,
 .ai .message-content .message-body .message-text {
     margin: 0;
@@ -482,35 +489,25 @@ ul.chat-category-list {
 }
 
 .table-responsive-container {
-    margin: 2.5rem 0;
-}
-
-.table-responsive-container:first-child {
-    margin-top: 0;
-}
-
-.table-responsive-container:last-child,
-.table-responsive-container:has(+ .modal-container) {
-    margin-bottom: 0;
-}
-
-/* Bootstrap Class Override */
-.table-responsive {
-    position: relative;
-    z-index: 1;
-    margin-bottom: 1rem;
-    overflow-x: auto;
-}
-
-.table-responsive table {
     width: 100%;
-    margin: auto;
-}
-
-.table-responsive.nowrap table th,
-.table-responsive.nowrap table td {
-    white-space: nowrap;
-}
+    max-width: 100%;
+    margin: 1rem 0;              
+  }
+  
+  .table-responsive {
+    overflow-x: auto;               
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    max-width: 100%; 
+    padding: 0;
+  }
+  
+  /* Force horizontal scrolling (no line wrapping) if you want:
+     This keeps each cell in a single line, so a narrow screen triggers scroll. */
+  .table-responsive table th,
+  .table-responsive table td {
+    white-space: wrap;
+  }
 
 /* =======================================
    FORMULAS
