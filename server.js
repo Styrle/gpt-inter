@@ -14,6 +14,7 @@ const mammoth = require('mammoth');
 const xlsx = require('xlsx');
 const tesseract = require('tesseract.js');
 const { CosmosClient } = require("@azure/cosmos");
+const { BlobServiceClient } = require('@azure/storage-blob');
 const helmet = require('helmet');
 const textract = require('textract');
 const { htmlToText } = require('html-to-text');
@@ -73,6 +74,39 @@ app.use(helmet({
         },
     },
 }));
+
+async function getDataFromAzureSearch(query) {
+    const url = `${process.env.AZURE_SEARCH_ENDPOINT}/indexes/${process.env.AZURE_SEARCH_INDEX}/docs?api-version=2021-04-30-Preview&search=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'api-key': process.env.AZURE_SEARCH_API_KEY
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Azure Search request failed: ${response.statusText}`);
+    }
+    const data = await response.json();
+    // We'll combine the 'content' fields from each doc into one big string.
+    // If your schema is different, adjust as needed:
+    return data.value.map(item => {
+        // 'item.content' is an example field name
+        const docName = item.metadata_storage_name || 'Document';
+        const docText = item.content || '';
+        return `Document: ${docName}\n\n${docText}`;
+    }).join('\n\n---\n\n');
+}
+
+function extractReferencesFromText(aiText) {
+    const refRegex = /\[ref:\s*([^\]]+)\]/g;
+    let match;
+    const refs = [];
+    while ((match = refRegex.exec(aiText)) !== null) {
+        refs.push(match[1].trim());
+    }
+    return refs;
+}
 
 // ========================================
 // Authentication Middleware
@@ -350,7 +384,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     const { message, tutorMode, chatId: providedChatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    // Test condition: If user sends "test-rate-limit" message, respond with a 429 error
     if (message === "test-rate-limit") {
         return res.status(429).json({ retryAfter: 10 });
     }
@@ -361,7 +394,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         chatId = `${userId}_chat_${randomNumber}`;
     }
 
-    // If no message and no images, return error
     if (!message && (!req.files || req.files.length === 0)) {
         return res.status(400).json({ error: 'Missing message or files' });
     }
@@ -390,59 +422,82 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
     if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-    // Prepare last 20 messages for context, including timestamps in content
+    // Prepare last 20 messages
     let messages = chat.messages.slice(-20).map(msg => ({
         role: msg.role,
-        // Integrate the timestamp into the content so the model can see it
         content: `[${msg.timestamp}] ${msg.content}`,
         tokens: msg.tokens
     }));
 
-    // Add system message with or without Tutor Mode
+    // === Replace blob approach with Azure Search ===
+    // We’ll pass the user's entire message to Azure Search
+    // (Or a separate 'searchQuery' param if you prefer).
+    let searchResults = '';
+    try {
+        // Query Azure Cognitive Search
+        searchResults = await getDataFromAzureSearch(message);
+    } catch (err) {
+        console.error('Azure Search error:', err);
+        // We can just keep 'searchResults' empty if search fails
+        searchResults = '';
+    }
+
+    // We might want to truncate results to avoid prompt size issues
+    const MAX_SYSTEM_CONTENT_LENGTH = 700_000;
+    if (searchResults.length > MAX_SYSTEM_CONTENT_LENGTH) {
+        searchResults = searchResults.slice(0, MAX_SYSTEM_CONTENT_LENGTH)
+            + "\n\n[NOTE: The rest of the search results were truncated]";
+    }
+
+    // === 2) CREATE UPDATED SYSTEM MESSAGE THAT INCLUDES BLOB DATA ===
+    //    If you want to maintain your existing system instructions, we blend it with the blob text:
+    const baseSystemText = tutorMode
+        ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
+        : "You are KaplanGPT, an assistant at Kaplan UK, a company providing apprenticeships and professional qualification in accounting & tax as well as data and IT. \n\nYour job is to help Kaplan staff members do their jobs. The staff work in the production and delivery of Kaplan's educational products. You may talk freely about topics that a user wants to discuss. You will be provided with data, documents and Kaplan's IP that you should converse freely about to the user.\n\nAs well as providing information about Kaplan, you will also assist with summarising; rewriting; checking spelling, grammar and tone of voice; helping to write materials; writing, checking and helping to refactor code; managing staff members; analysing documents and providing details contained within them; day-to-day admin tasks; as well as any other tasks that help staff at Kaplan perform their roles.\n\nIf a user provides you with a source of content and queries it, you must limit your answer to information contained within that content unless specifically asked otherwise.\n\nYou must not answer any questions on material produced by Tolley that a user adds as a prompt. If there is evidence to suggest the content you are provided with is produced by Tolley, you must let the user know you are not able to answer questions on Tolley material as requested by Tolley. You may answer general questions about Tolley as a business.\n\nYou have a friendly and professional manner and will always use British English. You must also use British as the default setting for other things such as when asked about law, regulations, standards or popular culture unless explicitly asked otherwise by the user.\n\nRemembers all previous interactions in this chat and can recall them when asked.";
+
+    // Suggest the model references blob data like: [ref: docNameHere]
+    const systemContent = `
+    ${baseSystemText}
+    
+    # Additional Search Data:
+    ${searchResults}
+    
+    (If you cite data from these documents, use [ref: docNameHere].)
+    `;    
+
+    // Insert the new system message at the beginning
     const systemMessage = {
         role: 'system',
-        content: tutorMode
-            ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-            : "You are KaplanGPT, an assistant at Kaplan UK, a company providing apprenticeships and professional qualification in accounting & tax as well as data and IT. \n\nYour job is to help Kaplan staff members do their jobs. The staff work in the production and delivery of Kaplan's educational products. You may talk freely about topics that a user wants to discuss. You will be provided with data, documents and Kaplan's IP that you should converse freely about to the user.\n\nAs well as providing information about Kaplan, you will also assist with summarising; rewriting; checking spelling, grammar and tone of voice; helping to write materials; writing, checking and helping to refactor code; managing staff members; analysing documents and providing details contained within them; day-to-day admin tasks; as well as any other tasks that help staff at Kaplan perform their roles.\n\nIf a user provides you with a source of content and queries it, you must limit your answer to information contained within that content unless specifically asked otherwise.\n\nYou must not answer any questions on material produced by Tolley that a user adds as a prompt. If there is evidence to suggest the content you are provided with is produced by Tolley, you must let the user know you are not able to answer questions on Tolley material as requested by Tolley. You may answer general questions about Tolley as a business.\n\nYou have a friendly and professional manner and will always use British English. You must also use British as the default setting for other things such as when asked about law, regulations, standards or popular culture unless explicitly asked otherwise by the user. \n\n Remembers all previous interactions in this chat and can recall them when asked.",
+        content: systemContent,
         timestamp: new Date().toISOString(),
     };
     messages.unshift(systemMessage);
 
-    // Build user content array with text and images
+    // === 3) HANDLE USER TEXT & IMAGES AS BEFORE ===
     let userContentArray = [];
     if (message) {
         userContentArray.push({ type: 'text', text: message });
     }
-
-    // Process multiple images
     if (req.files && req.files.length > 0) {
         for (const file of req.files) {
             if (file.mimetype.startsWith('image/')) {
                 const base64Image = file.buffer.toString('base64');
                 const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
-
-                // Add the image to the user message content
                 userContentArray.push({ type: "image_url", image_url: { url: imageUrl } });
-
-                // Update image stats
                 if (typeof chat.total_image_count !== 'number') chat.total_image_count = 0;
                 if (typeof chat.total_image_size !== 'number') chat.total_image_size = 0;
-
                 chat.total_image_count += 1;
                 chat.total_image_size += file.size || 0;
             }
         }
     }
-
-    // If we have at least text or images, create a user message
     if (userContentArray.length > 0) {
         messages.push({
             role: 'user',
             content: userContentArray,
             timestamp: new Date().toISOString(),
         });
-
-        // Also store in chat history (just store the text or "Sent images")
+        // Also store in chat history
         chat.messages.push({
             role: 'user',
             content: message || 'Sent images',
@@ -451,7 +506,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         });
     }
 
-    // Include document content if available
+    // If we have previously extracted doc content
     if (chat.documentContent) {
         messages.push({
             role: 'user',
@@ -460,7 +515,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         });
     }
 
-    // Call OpenAI
+    // === 4) CALL OPENAI ===
     const payload = {
         model: 'gpt-4o',
         messages: messages,
@@ -489,6 +544,9 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     console.log('AI Response:', aiResponse);
     console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
 
+    // === 5) EXTRACT REFERENCES FROM FINAL AI TEXT (IF YOU HAVE A HELPER) ===
+    const references = extractReferencesFromText(aiResponse);
+
     // Store assistant response in chat
     chat.messages.push({
         role: 'assistant',
@@ -503,39 +561,42 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
     chat.timestamp = new Date().toISOString();
 
-    // Generate a title for a new chat
+    // === 6) GENERATE TITLE IF NEW CHAT ===
     if (isNewChat) {
-        const titlePrompt = [
-            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
-            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
-        ];
-
-        const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
-
-        const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'api-key': process.env.AZURE_OPENAI_API_KEY,
-            },
-            body: JSON.stringify(titlePayload),
-        });
-
-        if (titleResponse.ok) {
-            const titleData = await titleResponse.json();
-            const generatedTitle = titleData.choices[0].message.content.trim();
-            chat.title = generatedTitle;
-        } else {
-            const errorText = await titleResponse.text();
-            console.error('Error generating title:', errorText);
+        try {
+            const titlePrompt = [
+                { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
+                { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
+            ];
+            const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
+            const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'api-key': process.env.AZURE_OPENAI_API_KEY,
+                },
+                body: JSON.stringify(titlePayload),
+            });
+            if (titleResponse.ok) {
+                const titleData = await titleResponse.json();
+                const generatedTitle = titleData.choices[0].message.content.trim();
+                chat.title = generatedTitle;
+            } else {
+                const errorText = await titleResponse.text();
+                console.error('Error generating title:', errorText);
+            }
+        } catch (err) {
+            console.error('Error during title generation:', err);
         }
     }
 
+    // Upsert chat
     await upsertChatHistory(chat);
     const category = categorizeChat(chat.timestamp);
 
-    res.json({
+    return res.json({
         response: aiResponse,
+        references,  
         chatId,
         category,
         tokens: total_tokens,

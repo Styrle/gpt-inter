@@ -171,7 +171,7 @@ async function sendMessage(message) {
         }
 
         const data = await response.json();
-        return data.response;
+        return data;
     } catch (error) {
         console.error('Error sending message:', error);
         return null;
@@ -960,7 +960,8 @@ sendBtn.addEventListener('click', async () => {
 
         // If we got a successful response, replace loading dots with streamed AI message
         const messageContent = loadingMessageElement.querySelector('.message-content');
-        streamParsedResponse(messageContent, response);
+        const responseObj = await sendMessage(message);
+        streamParsedResponse(messageContent, responseObj.response, responseObj.references);
 
         loadChatHistory();
     }
@@ -1019,7 +1020,8 @@ chatInput.addEventListener('keydown', async (event) => {
             // If we got a successful response, handle AI message streaming
             if (response) {
                 const messageContent = loadingMessageElement.querySelector('.message-content');
-                streamParsedResponse(messageContent, response);
+                const responseObj = await sendMessage(message);
+                streamParsedResponse(messageContent, responseObj.response, responseObj.references);
                 loadChatHistory();
             } else {
                 console.error('Response is undefined.');
@@ -1059,7 +1061,7 @@ function streamMessageFromServer() {
     };
 }
 
-function streamParsedResponse(messageContent, rawResponseText) {
+function streamParsedResponse(messageContent, rawResponseText, references) {
     // Remove any loading dots if present
     const messageBody = messageContent.querySelector('.message-body');
     if (!messageBody) {
@@ -1087,8 +1089,8 @@ function streamParsedResponse(messageContent, rawResponseText) {
     let currentWordIndex = 0;
     let accumulatedText = '';
 
-    const intervalSpeed = 10; // Faster interval for smoother streaming
-    const maxWordsPerChunk = 5; // Append a few words per iteration for even smoother streaming
+    const intervalSpeed = 10;   // Faster interval for smoother streaming
+    const maxWordsPerChunk = 5; // Append a few words per iteration
 
     const wordInterval = setInterval(() => {
         if (currentWordIndex < words.length) {
@@ -1099,14 +1101,38 @@ function streamParsedResponse(messageContent, rawResponseText) {
             }
             currentWordIndex = chunkEnd;
 
-            // Update the textContent quickly (no markdown, just raw text now)
+            // Update textContent quickly (plain text streaming)
             messageText.textContent = accumulatedText;
             chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
         } else {
             clearInterval(wordInterval);
 
-            // Streaming done, now we do the final parsing & formatting
+            // Streaming done, now do the final parsing & formatting
             finalizeResponseFormatting(messageBody, accumulatedText);
+
+            // === Add references (if any) after final formatting ===
+            if (references && references.length > 0) {
+                const refContainer = document.createElement('div');
+                refContainer.classList.add('references-container');
+
+                const heading = document.createElement('div');
+                heading.classList.add('references-heading');
+                heading.textContent =
+                    references.length === 1 ? '1 reference' : `${references.length} references`;
+                refContainer.appendChild(heading);
+
+                const refList = document.createElement('ul');
+                refList.classList.add('references-list');
+
+                references.forEach(ref => {
+                    const li = document.createElement('li');
+                    li.textContent = ref;  // Or add links if you want clickable references
+                    refList.appendChild(li);
+                });
+                refContainer.appendChild(refList);
+
+                messageBody.appendChild(refContainer);
+            }
         }
     }, intervalSpeed);
 }

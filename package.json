@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "@azure/cosmos": "^4.1.1",
+    "@azure/storage-blob": "^12.26.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "docx": "^9.0.0",
@@ -40,6 +41,5 @@
     "tesseract.js": "^5.1.1",
     "textract": "^2.5.0",
     "xlsx": "^0.18.5"
-  },
-  "devDependencies": {}
+  }
 }
