@@ -500,7 +500,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                     
                     const tableContainer = document.createElement('div');
                     tableContainer.classList.add('table-responsive-container');
-
+                  
                     const scrollableDiv = document.createElement('div');
                     scrollableDiv.classList.add('table-responsive');
                     scrollableDiv.setAttribute('tabindex', '0');
@@ -529,7 +529,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             } else if (index % 3 === 1) {
                 // Language for the code block
                 language = safePart;
-
             } else if (index % 3 === 2) {
                 // Code block content
                 const codeBlock = document.createElement("div");
@@ -1200,6 +1199,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
 
     // Track language for code blocks
     let language = '';
+
 
     for (let i = 0; i < parts.length; i++) {
         const currentPart = parts[i] || '';
