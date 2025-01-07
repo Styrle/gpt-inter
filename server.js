@@ -464,6 +464,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     const payload = {
         model: 'gpt-4o',
         messages: messages,
+        temperature: 0.7,
     };
 
     const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
