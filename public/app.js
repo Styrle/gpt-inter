@@ -1,6 +1,5 @@
 // Generate a new chatId on page load
 let chatId = generateChatId();
-sessionStorage.setItem('chatId', chatId);
 
 document.addEventListener("DOMContentLoaded", () => {
     if (window.MathJax) {
@@ -171,6 +170,12 @@ async function sendMessage(message) {
         }
 
         const data = await response.json();
+
+        if (data.chatId) {
+            chatId = data.chatId;
+            sessionStorage.setItem('chatId', chatId);
+        }
+
         return data.response;
     } catch (error) {
         console.error('Error sending message:', error);
@@ -945,7 +950,7 @@ sendBtn.addEventListener('click', async () => {
             console.error('Error sending message:', error);
         }
 
-        // If we hit a rate limit or there's no response (error)
+        // If we hit a rate limit or there's no response
         if (response === null) {
             // Remove the user's message and loading message
             if (userMessageElement && userMessageElement.parentNode) {
@@ -961,9 +966,16 @@ sendBtn.addEventListener('click', async () => {
         const messageContent = loadingMessageElement.querySelector('.message-content');
         streamParsedResponse(messageContent, response);
 
-        loadChatHistory();
+        // === KEY FIX: Wait for loadChatHistory so the sidebar refreshes properly ===
+        try {
+            await loadChatHistory();
+        } catch (err) {
+            console.error('Error loading chat history:', err);
+        }
+        // === END FIX ===
     }
 });
+
 
 chatInput.addEventListener('keydown', async (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -1005,7 +1017,6 @@ chatInput.addEventListener('keydown', async (event) => {
 
             // If we hit a rate limit or there's no response
             if (response === null) {
-                // Remove the user's message and loading message
                 if (userMessageElement && userMessageElement.parentNode) {
                     userMessageElement.parentNode.removeChild(userMessageElement);
                 }
@@ -1015,17 +1026,25 @@ chatInput.addEventListener('keydown', async (event) => {
                 return;
             }
 
-            // If we got a successful response, handle AI message streaming
             if (response) {
+                // If we got a successful response, handle AI message streaming
                 const messageContent = loadingMessageElement.querySelector('.message-content');
                 streamParsedResponse(messageContent, response);
-                loadChatHistory();
+
+                // === KEY FIX: Wait for loadChatHistory so the sidebar refreshes properly ===
+                try {
+                    await loadChatHistory();
+                } catch (err) {
+                    console.error('Error loading chat history:', err);
+                }
+                // === END FIX ===
             } else {
                 console.error('Response is undefined.');
             }
         }
     }
 });
+
 
 
 sendBtn.addEventListener('keydown', function(event) {
@@ -1439,6 +1458,12 @@ async function sendMessageWithImage(message, imageFiles) {
         }
 
         const data = await res.json();
+
+        if (data.chatId) {
+            chatId = data.chatId;
+            sessionStorage.setItem('chatId', chatId);
+        }
+
         updateImageStats(data.total_image_count, data.total_image_size);
 
         return data.response;
@@ -1615,17 +1640,22 @@ window.onload = async () => {
         }
 
         const data = await response.json();
+
+        // Store the real user info
         sessionStorage.setItem('userId', data.userId);
         sessionStorage.setItem('userName', data.userName);
 
+        // Now that userId is in sessionStorage, we can safely generate a chatId if needed:
         chatId = sessionStorage.getItem('chatId') || generateChatId();
         sessionStorage.setItem('chatId', chatId);
 
-        loadChatHistory();  // Load chats that belong to the user
+        // Load the user's chats
+        loadChatHistory();  
         showWelcomeScreen();
+
     } catch (error) {
         console.error('Error fetching user info:', error);
-        window.location.href = '/login'; // Redirect to login on error
+        window.location.href = '/login'; 
     }
 };
 
@@ -1663,14 +1693,12 @@ function createImageModal() {
     closeBtn.addEventListener('click', () => {
         modal.style.display = 'none';
         // We do NOT revokeObjectURL here because we may need to show the same image again.
-        // If you do need to revoke, do so only when the image will never be displayed again.
     });
 
     // Close modal when clicking outside the image
     modal.addEventListener('click', (event) => {
         if (event.target === modal) {
             modal.style.display = 'none';
-            // Same note as above about revokeObjectURL.
         }
     });
 
