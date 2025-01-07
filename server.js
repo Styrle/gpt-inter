@@ -49,37 +49,57 @@ const container = database.container(process.env.COSMOS_DB_CONTAINER_ID);
 // ========================================
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ========================================
-// Setup Redis Connection
-// ========================================
 
-const redisClient = createClient({
+// ========================================
+// Conditionally Setup Session Store
+// ========================================
+let sessionStore;
+
+if (isDevelopment) {
+  // =============== LOCAL/DEV ===============
+  // Use the default MemoryStore for session
+  // (This is ephemeral in your local process)
+  sessionStore = new session.MemoryStore();
+  console.log("Using in-memory session store (dev).");
+
+} else {
+  // =============== PRODUCTION ===============
+  // Use Redis store, passing in a Redis client
+  console.log("Using Redis session store (production).");
+
+  const redisClient = createClient({
     socket: {
       host: process.env.REDIS_HOST,
       port: process.env.REDIS_PORT || 6380,
-      tls: true // if your Azure Redis requires TLS
+      tls: true // If your Azure Redis requires TLS
     },
     password: process.env.REDIS_PASSWORD,
   });
-  redisClient.connect().catch(console.error);
-  
-  // 3) Create an instance of the new store
-  const store = new RedisStore({ client: redisClient });
+  redisClient.connect().catch((err) => console.error("Redis connect error:", err));
+
+  redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+  redisClient.on('connect', () => console.log('Redis client connecting...'));
+  redisClient.on('ready', () => console.log('Redis client ready to use!'));
+  redisClient.on('end', () => console.log('Redis client disconnected'));
+
+  sessionStore = new RedisStore({ client: redisClient });
+}
   
   // ========================================
   // Middleware: Session with Redis Store
   // ========================================
   app.use(session({
-    store,
+    store: sessionStore,
     secret: process.env.SESSION_SECRET || 'defaultSecret3',
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: !isDevelopment,
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000,
     },
   }));
+  
 
 app.use(express.json());
 app.use(express.static('public'));
