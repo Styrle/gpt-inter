@@ -252,6 +252,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
     if (!chatId) return res.status(400).json({ error: 'Missing chatId' });
 
+    // Ensure that the chatId belongs to the current user
     if (!chatId.startsWith(`${userId}_chat_`)) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
@@ -328,7 +329,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             text: extractedText
         });
 
-        // 4) Load chat from Cosmos (just for stats & references) 
+        // 4) Load chat from Cosmos (just for stats & references)
         let chat = await getChatHistory(chatId);
         if (!chat) {
             chat = {
@@ -338,7 +339,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 timestamp: new Date().toISOString(),
                 total_document_count: 0,
                 total_document_size: 0
-                // Notice we removed documentContent if you truly don't want to store any text
+                // We do NOT store the actual document content
             };
         }
 
@@ -346,11 +347,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
         if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // 6) Update doc stats in Cosmos (KEEP)
+        // 6) Update doc stats in Cosmos
         chat.total_document_count += 1;
         chat.total_document_size += file.size || 0;
 
-        // 7) Add a message referencing the file (but NOT adding the actual text)
+        // 7) Add a message referencing the file
         chat.messages.push({
             role: 'user',
             content: `Uploaded a document: ${file.originalname}`,
@@ -366,7 +367,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
         // Done
         res.status(200).json({ success: true });
-
     } catch (error) {
         console.error('Error processing file:', error);
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
@@ -418,7 +418,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
     if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-    // Prepare last 20 messages for context, including timestamps in content
+    // Prepare last 20 messages for context
     let messages = chat.messages.slice(-20).map(msg => ({
         role: msg.role,
         content: `[${msg.timestamp}] ${msg.content}`,
@@ -460,7 +460,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         }
     }
 
-    // If we have at least text or images, create a user message
+    // Create a user message if we have text or images
     if (userContentArray.length > 0) {
         messages.push({
             role: 'user',
@@ -468,7 +468,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             timestamp: new Date().toISOString(),
         });
 
-        // Also store in chat history (just store the text or "Sent images")
         chat.messages.push({
             role: 'user',
             content: message || 'Sent images',
@@ -477,8 +476,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         });
     }
 
-    // === NEW: Incorporate ephemeral text from session (if any exists for this chat) ===
-    // We do NOT store it in Cosmos, but we DO let the model see it for context.
+    // == Incorporate ephemeral text from session (if any) ==
     if (req.session.extractedTexts && req.session.extractedTexts.length > 0) {
         // Filter only those texts for this particular chatId
         const relevantTexts = req.session.extractedTexts
@@ -495,7 +493,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             });
         }
     }
-    // === END NEW CODE ===
+    // == End ephemeral session content ==
 
     // Call OpenAI
     const payload = {
@@ -526,7 +524,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     console.log('AI Response:', aiResponse);
     console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
 
-    // Store assistant response in chat
+    // Store assistant response
     chat.messages.push({
         role: 'assistant',
         content: aiResponse,
@@ -536,15 +534,15 @@ app.post('/chat', upload.array('image'), async (req, res) => {
 
     // Update stats
     chat.total_tokens_used += total_tokens;
-    chat.total_interactions += 2;
+    chat.total_interactions += 2; // user + assistant
     chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
     chat.timestamp = new Date().toISOString();
 
     // Generate a title for a new chat
     if (isNewChat) {
         const titlePrompt = [
-            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
-            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
+            { role: 'system', content: 'You are an assistant that generates concise titles...' },
+            { role: 'user', content: message || 'The title should be 5 words or less...' }
         ];
 
         const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
