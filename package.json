@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "@azure/cosmos": "^4.1.1",
+    "connect-redis": "^8.0.1",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "docx": "^9.0.0",
@@ -34,12 +35,12 @@
     "passport-azure-ad": "^4.3.5",
     "path": "^0.12.7",
     "pdf-parse": "^1.1.1",
+    "redis": "^4.7.0",
     "remove-markdown": "^0.5.5",
     "session": "^0.1.0",
     "sharp": "^0.33.5",
     "tesseract.js": "^5.1.1",
     "textract": "^2.5.0",
     "xlsx": "^0.18.5"
-  },
-  "devDependencies": {}
+  }
 }
