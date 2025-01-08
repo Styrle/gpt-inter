@@ -5,8 +5,6 @@ require('dotenv').config();
 
 const express = require('express');
 const session = require('express-session');
-const { RedisStore } = require('connect-redis');
-const { createClient } = require('redis');
 const multer = require('multer');
 const { OpenAI } = require('openai');
 const fs = require('fs');
@@ -49,57 +47,19 @@ const container = database.container(process.env.COSMOS_DB_CONTAINER_ID);
 // ========================================
 const upload = multer({ storage: multer.memoryStorage() });
 
-
 // ========================================
-// Conditionally Setup Session Store
+// Middleware: Session and Security
 // ========================================
-let sessionStore;
-
-if (isDevelopment) {
-  // =============== LOCAL/DEV ===============
-  // Use the default MemoryStore for session
-  // (This is ephemeral in your local process)
-  sessionStore = new session.MemoryStore();
-  console.log("Using in-memory session store (dev).");
-
-} else {
-  // =============== PRODUCTION ===============
-  // Use Redis store, passing in a Redis client
-  console.log("Using Redis session store (production).");
-
-  const redisClient = createClient({
-    socket: {
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT || 6380,
-      tls: true // If your Azure Redis requires TLS
-    },
-    password: process.env.REDIS_PASSWORD,
-  });
-  redisClient.connect().catch((err) => console.error("Redis connect error:", err));
-
-  redisClient.on('error', (err) => console.error('Redis Client Error:', err));
-  redisClient.on('connect', () => console.log('Redis client connecting...'));
-  redisClient.on('ready', () => console.log('Redis client ready to use!'));
-  redisClient.on('end', () => console.log('Redis client disconnected'));
-
-  sessionStore = new RedisStore({ client: redisClient });
-}
-  
-  // ========================================
-  // Middleware: Session with Redis Store
-  // ========================================
-  app.use(session({
-    store: sessionStore,
+app.use(session({
     secret: process.env.SESSION_SECRET || 'defaultSecret3',
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      secure: !isDevelopment,
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
     },
-  }));
-  
+}));
 
 app.use(express.json());
 app.use(express.static('public'));
@@ -297,6 +257,19 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     try {
+        // 1) Keep the file in-session only (no Cosmos)
+        if (!req.session.tempFiles) {
+            req.session.tempFiles = [];
+        }
+        req.session.tempFiles.push({
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size,
+            buffer: file.buffer,
+            uploadedAt: new Date()
+        });
+
+        // 2) Extract text but do NOT store in Cosmos
         let extractedText = '';
 
         // Handle images with OCR (tesseract.js)
@@ -345,6 +318,17 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             }
         }
 
+        // 3) Keep extracted text in session memory for the chat, not in Cosmos
+        if (!req.session.extractedTexts) {
+            req.session.extractedTexts = [];
+        }
+        req.session.extractedTexts.push({
+            chatId,
+            fileName: file.originalname,
+            text: extractedText
+        });
+
+        // 4) Load chat from Cosmos (just for stats & references) 
         let chat = await getChatHistory(chatId);
         if (!chat) {
             chat = {
@@ -353,20 +337,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 messages: [],
                 timestamp: new Date().toISOString(),
                 total_document_count: 0,
-                total_document_size: 0,
-                documentContent: '',
+                total_document_size: 0
+                // Notice we removed documentContent if you truly don't want to store any text
             };
         }
 
-        // Ensure fields
+        // 5) Ensure fields for doc stats
         if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
         if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // Update document stats
+        // 6) Update doc stats in Cosmos (KEEP)
         chat.total_document_count += 1;
         chat.total_document_size += file.size || 0;
 
-        // Append a message referencing the uploaded document
+        // 7) Add a message referencing the file (but NOT adding the actual text)
         chat.messages.push({
             role: 'user',
             content: `Uploaded a document: ${file.originalname}`,
@@ -374,10 +358,13 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             documentSize: file.size || 0,
         });
 
-        // Append extracted text to the chat's stored document content
-        chat.documentContent = (chat.documentContent || '') + '\n' + extractedText;
+        // 8) DO NOT store the extracted text in Cosmos (skip chat.documentContent).
+        //    We only store doc stats & the reference message.
 
+        // 9) Upsert chat in Cosmos
         await upsertChatHistory(chat);
+
+        // Done
         res.status(200).json({ success: true });
 
     } catch (error) {
@@ -385,6 +372,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
     }
 });
+
 
 app.post('/chat', upload.array('image'), async (req, res) => {
     const { message, tutorMode, chatId: providedChatId } = req.body;
@@ -422,7 +410,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             total_image_count: 0,
             total_image_size: 0,
             total_document_count: 0,
-            total_document_size: 0,
+            total_document_size: 0
         };
     }
 
@@ -433,7 +421,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     // Prepare last 20 messages for context, including timestamps in content
     let messages = chat.messages.slice(-20).map(msg => ({
         role: msg.role,
-        // Integrate the timestamp into the content so the model can see it
         content: `[${msg.timestamp}] ${msg.content}`,
         tokens: msg.tokens
     }));
@@ -461,7 +448,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
                 const base64Image = file.buffer.toString('base64');
                 const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
 
-                // Add the image to the user message content
                 userContentArray.push({ type: "image_url", image_url: { url: imageUrl } });
 
                 // Update image stats
@@ -491,14 +477,25 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         });
     }
 
-    // Include document content if available
-    if (chat.documentContent) {
-        messages.push({
-            role: 'user',
-            content: `[${new Date().toISOString()}] Here is the document content:\n${chat.documentContent}`,
-            timestamp: new Date().toISOString(),
-        });
+    // === NEW: Incorporate ephemeral text from session (if any exists for this chat) ===
+    // We do NOT store it in Cosmos, but we DO let the model see it for context.
+    if (req.session.extractedTexts && req.session.extractedTexts.length > 0) {
+        // Filter only those texts for this particular chatId
+        const relevantTexts = req.session.extractedTexts
+            .filter(item => item.chatId === chatId)
+            .map(item => `From ${item.fileName}: ${item.text}`);
+
+        // If any relevant text, push it as a user message for context
+        if (relevantTexts.length > 0) {
+            const combinedText = relevantTexts.join('\n\n');
+            messages.push({
+                role: 'user',
+                content: `[Session-based file content for chat ${chatId}]\n${combinedText}`,
+                timestamp: new Date().toISOString(),
+            });
+        }
     }
+    // === END NEW CODE ===
 
     // Call OpenAI
     const payload = {
