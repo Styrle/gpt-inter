@@ -1,5 +1,62 @@
 // Generate a new chatId on page load
-let chatId = generateChatId();
+// Load the chat history when the page loads
+window.onload = async () => {
+    console.log("window.onload: Starting user-info fetch...");
+
+    try {
+        // (Optional) newChatBtn.disabled = true;
+
+        debugSessionStorage("BEFORE /user-info fetch (window.onload)");
+
+        const response = await fetch('/user-info', {
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (response.status === 401) {
+            console.warn("window.onload: /user-info => 401 Unauthorized => /login");
+            window.location.href = '/login';
+            return;
+        }
+        if (!response.ok) {
+            throw new Error(`HTTP error from /user-info! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("window.onload: /user-info =>", data);
+
+        sessionStorage.setItem('userId', data.userId);
+        sessionStorage.setItem('userName', data.userName);
+
+        console.log("window.onload: set userId =", data.userId);
+        console.log("window.onload: set userName =", data.userName);
+
+        chatId = sessionStorage.getItem('chatId') || generateChatId();
+        sessionStorage.setItem('chatId', chatId);
+
+        console.log("window.onload: final chatId =", chatId);
+
+        debugSessionStorage("AFTER storing user info (window.onload)");
+
+        await loadChatHistory();
+        showWelcomeScreen();
+
+        // Just to check again:
+        debugSessionStorage("AFTER loadChatHistory & showWelcomeScreen");
+
+        // newChatBtn.disabled = false;
+
+        console.log("window.onload: Done initialization.");
+    } catch (error) {
+        console.error('Error in window.onload:', error);
+        window.location.href = '/login';
+    }
+};
+
+let chatId;
 
 document.addEventListener("DOMContentLoaded", () => {
     if (window.MathJax) {
@@ -394,6 +451,15 @@ function createScrollTable(index, element) {
     };
 }
 
+// Update the showWelcomeScreen function:
+function showWelcomeScreen() {
+    const welcomeContainer = document.getElementById('welcome-container');
+    const userName = sessionStorage.getItem('userName') || 'User';
+    welcomeContainer.style.display = 'block'; // Show the welcome screen
+    const welcomeMessage = welcomeContainer.querySelector('p');
+    welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
+}
+
 
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
@@ -420,17 +486,81 @@ async function loadChat(chatIdToLoad) {
     chatInput.focus();
 }
 
-newChatBtn.addEventListener('click', () => {
+newChatBtn.addEventListener('click', async () => {
+    console.log("newChatBtn clicked. Checking sessionStorage userId...");
+    debugSessionStorage("INSIDE newChatBtn");
+
+    let storedUserId = sessionStorage.getItem('userId');
+
+    if (!storedUserId || storedUserId === 'anonymous') {
+        console.error("newChatBtn: userId is null/anonymous. Possibly sessionStorage was cleared.");
+
+        // Try one-time re-fetch of /user-info:
+        try {
+            console.warn("newChatBtn: Attempting to re-fetch /user-info to recover user session...");
+            const response = await fetch('/user-info', {
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                console.warn("newChatBtn: /user-info re-fetch =>", data);
+                // Re-store:
+                sessionStorage.setItem('userId', data.userId);
+                sessionStorage.setItem('userName', data.userName);
+
+                // Check if that helped:
+                storedUserId = data.userId;
+                if (!storedUserId || storedUserId === 'anonymous') {
+                    console.error("newChatBtn: Even after re-fetch, userId is empty. Aborting new chat.");
+                    alert("Cannot create new chat, user info not loaded. Please refresh the page or log in again.");
+                    return;
+                }
+                console.log("newChatBtn: Re-fetch succeeded. userId=", storedUserId);
+            } else {
+                console.error("newChatBtn: Re-fetch /user-info failed =>", response.status);
+                alert("Cannot create new chat, user info is missing. Please refresh the page or log in again.");
+                return;
+            }
+        } catch (err) {
+            console.error("newChatBtn: Error re-fetching /user-info =>", err);
+            alert("Cannot create new chat, user info not loaded. Refresh or log in again.");
+            return;
+        }
+    }
+
+    // If we reach here, we have a valid userId.
     chatBox.innerHTML = '';
     showWelcomeScreen();
 
-    // Generate a new chatId and store it in sessionStorage
     chatId = generateChatId();
     sessionStorage.setItem('chatId', chatId);
 
+    console.log("newChatBtn: Created new chatId =", chatId);
+    debugSessionStorage("AFTER generating new chatId");
+
     loadChatHistory();
+
     isFirstInteraction = true;
 });
+
+function debugSessionStorage(label = "") {
+    console.log(`\n--- Debugging sessionStorage: ${label} ---`);
+    if (sessionStorage.length === 0) {
+        console.warn("sessionStorage is EMPTY (length=0)");
+    } else {
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            const val = sessionStorage.getItem(key);
+            console.log(`[${key}] =`, val);
+        }
+    }
+    console.log("--- End of sessionStorage debug ---\n");
+}
+
 
 function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const chatBox = document.getElementById("chat-box");
@@ -642,7 +772,7 @@ function generateChatId() {
     const userId = sessionStorage.getItem('userId') || 'anonymous';
     const randomNumber = Math.random().toString(36).substr(2, 9);
     return `${userId}_chat_${randomNumber}`;
-  }
+}
 
 let selectedImageFile = null;
 
@@ -897,7 +1027,6 @@ function initializeActiveState() {
 // Call the initializeActiveState function when the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', () => {
     initializeActiveState();
-    loadChatHistory(); // Load chat history on page load
 
        // Add keyboard accessibility for the collapse button
        const collapseBtn = document.getElementById('collapse-btn');
@@ -1393,12 +1522,6 @@ chatInput.addEventListener('blur', () => {
     }
 });
 
-// Function to show the welcome screen
-function showWelcomeScreen() {
-    const welcomeContainer = document.getElementById('welcome-container');
-    welcomeContainer.style.display = 'block'; // Show the welcome screen
-}
-
 // Function to hide the welcome screen
 function hideWelcomeScreen() {
     const welcomeContainer = document.getElementById('welcome-container');
@@ -1617,55 +1740,6 @@ function deleteChat(chatId) {
     .catch(error => {
         console.error('Error deleting chat:', error);
     });
-}
-
-// Load the chat history when the page loads
-window.onload = async () => {
-    try {
-        const response = await fetch('/user-info', {
-            credentials: 'include',
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        });
-
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        // Store the real user info
-        sessionStorage.setItem('userId', data.userId);
-        sessionStorage.setItem('userName', data.userName);
-
-        // Now that userId is in sessionStorage, we can safely generate a chatId if needed:
-        chatId = sessionStorage.getItem('chatId') || generateChatId();
-        sessionStorage.setItem('chatId', chatId);
-
-        // Load the user's chats
-        loadChatHistory();  
-        showWelcomeScreen();
-
-    } catch (error) {
-        console.error('Error fetching user info:', error);
-        window.location.href = '/login'; 
-    }
-};
-
-// Update the showWelcomeScreen function:
-function showWelcomeScreen() {
-    const welcomeContainer = document.getElementById('welcome-container');
-    const userName = sessionStorage.getItem('userName') || 'User';
-    welcomeContainer.style.display = 'block'; // Show the welcome screen
-    const welcomeMessage = welcomeContainer.querySelector('p');
-    welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
 }
 
 // === Modal Functions ===
