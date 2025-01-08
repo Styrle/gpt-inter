@@ -542,8 +542,8 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     // Generate a title for a new chat
     if (isNewChat) {
         const titlePrompt = [
-            { role: 'system', content: 'You are an assistant that generates concise titles...' },
-            { role: 'user', content: message || 'The title should be 5 words or less...' }
+            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
+            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
         ];
 
         const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
