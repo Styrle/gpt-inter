@@ -567,6 +567,8 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         }
     }
 
+    console.log("POST /chat => final chat after storing message:", JSON.stringify(chat, null, 2));
+
     await upsertChatHistory(chat);
     const category = categorizeChat(chat.timestamp);
 

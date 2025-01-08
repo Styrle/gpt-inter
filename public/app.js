@@ -764,7 +764,8 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     } else {
         console.error("MathJax is not loaded or does not support typesetPromise.");
     }
-
+    
+    console.log("appendMessage returning messageElement =", messageElement);
     return messageElement;
 }
 
@@ -1052,6 +1053,9 @@ document.addEventListener('DOMContentLoaded', () => {
 sendBtn.addEventListener('click', async () => {
     const message = chatInput.value.trim();
     if (message || selectedImageFiles.length > 0) {
+        console.log("---- sendBtn clicked ----");
+        console.log("  userId from sessionStorage =", sessionStorage.getItem('userId'));
+        console.log("  chatId from sessionStorage =", sessionStorage.getItem('chatId'));
         console.log(`Sending message with Tutor Mode: ${isTutorModeOn ? 'ON' : 'OFF'}`);
 
         if (isFirstInteraction) {
@@ -1059,10 +1063,11 @@ sendBtn.addEventListener('click', async () => {
             isFirstInteraction = false;
         }
 
-        // Append the user's message immediately
+        // Append the user's message
         const userMessageElement = appendMessage('You', message);
+        console.log("  Just appended user message, userMessageElement =", userMessageElement);
 
-        // Show AI loading message immediately
+        // Show AI loading
         const loadingMessageElement = appendMessage('AI', '', null, true);
 
         chatInput.value = '';
@@ -1081,6 +1086,7 @@ sendBtn.addEventListener('click', async () => {
 
         // If we hit a rate limit or there's no response
         if (response === null) {
+            console.warn("sendBtn: response is null (rate limit or error). Removing user message & loader...");
             // Remove the user's message and loading message
             if (userMessageElement && userMessageElement.parentNode) {
                 userMessageElement.parentNode.removeChild(userMessageElement);
@@ -1091,17 +1097,19 @@ sendBtn.addEventListener('click', async () => {
             return;
         }
 
-        // If we got a successful response, replace loading dots with streamed AI message
+        // If we got a successful response
         const messageContent = loadingMessageElement.querySelector('.message-content');
+        console.log("  sendBtn: AI responded, streaming AI response into messageContent =", messageContent);
         streamParsedResponse(messageContent, response);
 
-        // === KEY FIX: Wait for loadChatHistory so the sidebar refreshes properly ===
+        // After that, **await** loadChatHistory to refresh the sidebar:
+        console.log("  sendBtn: calling loadChatHistory after AI response");
         try {
             await loadChatHistory();
+            console.log("  sendBtn: loadChatHistory finished.");
         } catch (err) {
             console.error('Error loading chat history:', err);
         }
-        // === END FIX ===
     }
 });
 
