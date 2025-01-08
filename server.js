@@ -50,15 +50,16 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ========================================
 // Middleware: Session and Security
 // ========================================
+app.set('trust proxy', 1);
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'defaultSecret3',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { 
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000,
-    },
+  secret: process.env.SESSION_SECRET || 'defaultSecret3',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: true, 
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000
+  }
 }));
 
 app.use(express.json());
@@ -66,13 +67,13 @@ app.use(express.static('public'));
 
 app.use(helmet({
     contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'", "https://login.microsoftonline.com"],
-            scriptSrc: ["'self'", "https://login.microsoftonline.com"],
-            connectSrc: ["'self'", "https://login.microsoftonline.com"],
-        },
+      directives: {
+        defaultSrc: ["'self'", "https://login.microsoftonline.com"],
+        scriptSrc: ["'self'", "https://login.microsoftonline.com"],
+        connectSrc: ["'self'", "https://login.microsoftonline.com"],
+      },
     },
-}));
+  }));
 
 // ========================================
 // Authentication Middleware
