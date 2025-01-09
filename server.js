@@ -27,7 +27,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 // Configuration
 // ========================================
 const app = express();
-const port = 8080;
+const port = 2020;
 const isDevelopment = process.env.NODE_ENV === 'development';
 const NINETY_DAYS_IN_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -611,6 +611,87 @@ app.get('/chats', async (req, res) => {
     } catch (error) {
         console.error('Error retrieving chats:', error);
         res.status(500).json({ error: 'Failed to retrieve chats' });
+    }
+});
+
+app.delete('/chats/:chatId/files/:fileName', async (req, res) => {
+    const { chatId, fileName } = req.params;
+    const userId = req.user && req.user.email ? req.user.email : 'anonymous';
+    console.log(`[DELETE /chats/${chatId}/files/${fileName}] User=${userId}`);
+
+    // Check ownership
+
+    if (!chatId.startsWith(`${userId}_chat_`)) {
+        console.warn(`[DELETE /chats/${chatId}/files] Unauthorized attempt by user=${userId}`);
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    try {
+        // 1) Remove ephemeral text from req.session.extractedTexts (if present)
+        if (req.session.extractedTexts) {
+            const oldLen = req.session.extractedTexts.length;
+            req.session.extractedTexts = req.session.extractedTexts.filter(
+                (item) => !(item.chatId === chatId && item.fileName === fileName)
+            );
+            const newLen = req.session.extractedTexts.length;
+            if (oldLen !== newLen) {
+                console.log(`Removed ephemeral text for file="${fileName}" from session for chatId=${chatId}`);
+            } else {
+                console.log(`No ephemeral text found for file="${fileName}" in session for chatId=${chatId}`);
+            }
+        }
+
+        // 2) Remove references in Cosmos DB
+        const chat = await getChatHistory(chatId);
+        if (!chat) {
+            console.warn(`[DELETE /chats/${chatId}/files] Chat not found in DB.`);
+            return res.status(404).json({ error: 'Chat not found' });
+        }
+
+        let removedDocumentCount = 0;
+        let removedDocumentSize = 0;
+
+        // Filter out messages referencing "Uploaded a document: <fileName>"
+        const originalCount = chat.messages.length;
+        chat.messages = chat.messages.filter((msg) => {
+            const isDocMessage = msg.content === `Uploaded a document: ${fileName}`;
+            if (isDocMessage) {
+                removedDocumentCount += 1;
+                removedDocumentSize += (msg.documentSize || 0);
+            }
+            return !isDocMessage;
+        });
+
+        // If nothing changed:
+        if (chat.messages.length === originalCount) {
+            console.log(`[DELETE /chats/${chatId}/files] No matching message for file="${fileName}"`);
+            return res.status(404).json({ error: 'No matching file reference in chat messages' });
+        }
+
+        // Adjust doc stats
+        if (removedDocumentCount > 0) {
+            if (typeof chat.total_document_count === 'number') {
+                chat.total_document_count -= removedDocumentCount;
+                if (chat.total_document_count < 0) {
+                    chat.total_document_count = 0;
+                }
+            }
+            if (typeof chat.total_document_size === 'number') {
+                chat.total_document_size -= removedDocumentSize;
+                if (chat.total_document_size < 0) {
+                    chat.total_document_size = 0;
+                }
+            }
+        }
+
+        // Upsert updated chat
+        await upsertChatHistory(chat);
+
+        console.log(`[DELETE /chats/${chatId}/files] Deleted file="${fileName}" references. Updated chat in DB.`);
+        return res.json({ success: true });
+    } catch (err) {
+        console.error(`[DELETE /chats/${chatId}/files] Error:`, err);
+        return res.status(500).json({ error: 'Failed to delete file from chat' });
     }
 });
 

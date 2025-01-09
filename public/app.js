@@ -921,9 +921,30 @@ function appendFileLink(fileName, fileUrl) {
     deleteButton.textContent = 'delete';
     deleteButton.title = 'Delete this file message';
 
-    // Clicking the bin removes the entire file message
-    deleteButton.addEventListener('click', () => {
-        chatBox.removeChild(fileElement);
+    // Clicking the bin calls our DELETE route, then removes from DOM on success
+    deleteButton.addEventListener('click', async () => {
+        try {
+            console.log(`[appendFileLink] Attempting to delete file "${fileName}" from chatId=${chatId}`);
+
+            // Encode filename for URL safety
+            const encodedFileName = encodeURIComponent(fileName);
+
+            const resp = await fetch(`/chats/${chatId}/files/${encodedFileName}`, {
+                method: 'DELETE',
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                console.error('[appendFileLink] DELETE file failed =>', err.error || resp.statusText);
+                displayPopup(`Error removing file from chat: ${err.error || resp.statusText}`);
+            } else {
+                console.log(`[appendFileLink] File "${fileName}" deleted successfully. Removing from DOM...`);
+                chatBox.removeChild(fileElement);
+            }
+        } catch (err) {
+            console.error('[appendFileLink] Error calling DELETE for file:', err);
+            displayPopup(`Error deleting file: ${err}`);
+        }
     });
 
     // Add delete button to the message
