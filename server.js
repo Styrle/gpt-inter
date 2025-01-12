@@ -27,7 +27,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 // Configuration
 // ========================================
 const app = express();
-const port = 2020;
+const port = 8080;
 const isDevelopment = process.env.NODE_ENV === 'development';
 const NINETY_DAYS_IN_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -542,8 +542,8 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     // Generate a title for a new chat
     if (isNewChat) {
         const titlePrompt = [
-            { role: 'system', content: 'You are an assistant that generates concise titles...' },
-            { role: 'user', content: message || 'The title should be 5 words or less...' }
+            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
+            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
         ];
 
         const titlePayload = { model: 'gpt-4o', messages: titlePrompt };

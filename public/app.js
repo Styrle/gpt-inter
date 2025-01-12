@@ -1,61 +1,5 @@
 // Generate a new chatId on page load
 // Load the chat history when the page loads
-window.onload = async () => {
-    console.log("window.onload: Starting user-info fetch...");
-
-    try {
-        // (Optional) newChatBtn.disabled = true;
-
-        debugSessionStorage("BEFORE /user-info fetch (window.onload)");
-
-        const response = await fetch('/user-info', {
-            credentials: 'include',
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        });
-
-        if (response.status === 401) {
-            console.warn("window.onload: /user-info => 401 Unauthorized => /login");
-            window.location.href = '/login';
-            return;
-        }
-        if (!response.ok) {
-            throw new Error(`HTTP error from /user-info! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log("window.onload: /user-info =>", data);
-
-        sessionStorage.setItem('userId', data.userId);
-        sessionStorage.setItem('userName', data.userName);
-
-        console.log("window.onload: set userId =", data.userId);
-        console.log("window.onload: set userName =", data.userName);
-
-        chatId = sessionStorage.getItem('chatId') || generateChatId();
-        sessionStorage.setItem('chatId', chatId);
-
-        console.log("window.onload: final chatId =", chatId);
-
-        debugSessionStorage("AFTER storing user info (window.onload)");
-
-        await loadChatHistory();
-        showWelcomeScreen();
-
-        // Just to check again:
-        debugSessionStorage("AFTER loadChatHistory & showWelcomeScreen");
-
-        // newChatBtn.disabled = false;
-
-        console.log("window.onload: Done initialization.");
-    } catch (error) {
-        console.error('Error in window.onload:', error);
-        window.location.href = '/login';
-    }
-};
-
 let chatId;
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -755,7 +699,14 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
     messageElement.appendChild(messageContent);
     chatBox.appendChild(messageElement);
+
+    // Always scroll chat box to bottom
     chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Also scroll entire page to bottom for new user messages
+    if (sender === "You") {
+        window.scrollTo(0, document.body.scrollHeight);
+    }
 
     // Dynamically typeset MathJax for the newly added message element
     if (window.MathJax && MathJax.typesetPromise) {
@@ -1371,18 +1322,16 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     let entireMessage = '';
 
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
+
     // Safely split text by code blocks
     const parts = rawResponseText ? rawResponseText.split(codeBlockRegex) : [''];
-
-    // Track language for code blocks
     let language = '';
-
 
     for (let i = 0; i < parts.length; i++) {
         const currentPart = parts[i] || '';
 
         if (i % 3 === 0) {
-            // Regular text
+            // Regular text parts
             const textToProcess = currentPart.trim();
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
@@ -1390,17 +1339,17 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const finalHTML = processTextWithMarkdownAndMath(textToProcess);
             messageText.innerHTML = finalHTML;
 
-            // Example: add .table class
+            // Basic table styling
             const tables = messageText.querySelectorAll('table');
             tables.forEach((table) => {
-                table.classList.add('table'); 
+                table.classList.add('table');
             });
 
             messageBody.appendChild(messageText);
             entireMessage += textToProcess;
 
         } else if (i % 3 === 1) {
-            // Possible language specified
+            // Language for the code block
             language = currentPart ? currentPart.trim() : '';
 
         } else if (i % 3 === 2) {
@@ -1409,7 +1358,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
-            // Code block header
+            // ADDED: Code block header
             const codeBlockHeader = document.createElement('div');
             codeBlockHeader.classList.add('code-block-header');
             codeBlockHeader.textContent = language ? language : 'Code';
@@ -1425,10 +1374,8 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeContent.textContent = codeContentText;
             codeElement.appendChild(codeContent);
 
-            // Highlight.js
             hljs.highlightElement(codeContent);
 
-            // Inline copy button for code
             const codeCopyButton = document.createElement('span');
             codeCopyButton.classList.add('material-symbols-rounded', 'code-copy-button');
             codeCopyButton.textContent = 'content_copy';
@@ -1449,56 +1396,27 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         }
     }
 
-    // === Entire message copy button ===
+    // Entire message copy button
     const copyButtonContainer = document.createElement('div');
     copyButtonContainer.classList.add('copy-button-container');
 
     const copyButton = document.createElement('span');
     copyButton.classList.add('material-symbols-rounded', 'copy-button');
     copyButton.textContent = 'content_copy';
-
     copyButtonContainer.appendChild(copyButton);
+
     messageBody.appendChild(copyButtonContainer);
 
-    // Click => copy entire message, preserving HTML if a table is present
-    copyButton.addEventListener('click', async () => {
-        try {
-          const tableElement = messageBody.querySelector('table');
-      
-          if (tableElement) {
-            // 1) The entire rendered HTML:
-            const htmlString = messageBody.innerHTML;
-      
-            // 2) Create a Blob for HTML, and another for text fallback
-            const htmlBlob = new Blob([htmlString], { type: 'text/html' });
-            const textBlob = new Blob([htmlString], { type: 'text/plain' });
-      
-            // 3) Construct a multi-part ClipboardItem
-            const clipboardItems = [
-              new ClipboardItem({
-                'text/html': htmlBlob,
-                'text/plain': textBlob,
-              })
-            ];
-      
-            // 4) Write to the clipboard
-            await navigator.clipboard.write(clipboardItems);
-      
+    copyButton.addEventListener('click', () => {
+        navigator.clipboard.writeText(entireMessage).then(() => {
             copyButton.textContent = 'done';
-            setTimeout(() => copyButton.textContent = 'content_copy', 2000);
-      
-          } else {
-            // If no table, just copy text
-            // e.g., old fallback
-            const plainText = messageBody.innerText;
-            await navigator.clipboard.writeText(plainText);
-          }
-        } catch (err) {
-          console.error('Error copying:', err);
-        }
-      });
+            setTimeout(() => {
+                copyButton.textContent = 'content_copy';
+            }, 2000);
+        });
+    });
 
-    // Typeset MathJax again if available
+    // Typeset MathJax again
     if (window.MathJax && MathJax.typesetPromise) {
         MathJax.typesetPromise([messageBody])
             .catch(err => console.error("MathJax rendering failed:", err));
@@ -1822,4 +1740,53 @@ function showImageModal(imageUrl) {
     modal.style.display = 'flex'; // Show the modal
 }
 
+window.onload = async () => {
+    console.log("window.onload: Starting user-info fetch...");
+  
+    try {
+      debugSessionStorage("BEFORE /user-info fetch (window.onload)");
+  
+      const response = await fetch('/user-info', {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+  
+      if (response.status === 401) {
+        console.warn("window.onload: /user-info => 401 => /login");
+        window.location.href = '/login';
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP error from /user-info! status: ${response.status}`);
+      }
+  
+      const data = await response.json();
+      console.log("window.onload: /user-info =>", data);
+  
+      // Store user info in sessionStorage
+      sessionStorage.setItem('userId', data.userId);
+      sessionStorage.setItem('userName', data.userName);
+      console.log("window.onload: set userId =", data.userId);
+      console.log("window.onload: set userName =", data.userName);
+  
+      chatId = generateChatId();
+      sessionStorage.setItem('chatId', chatId);
+      console.log("window.onload: Forcing brand-new chatId on every refresh:", chatId);
+  
+      debugSessionStorage("AFTER /user-info fetch and chatId setup");
+  
+      // Proceed with loading the chat history, showing welcome, etc.
+      await loadChatHistory();
+      showWelcomeScreen();
+      debugSessionStorage("AFTER loadChatHistory & showWelcomeScreen");
+  
+      console.log("window.onload: Done initialization.");
+    } catch (error) {
+      console.error('Error in window.onload:', error);
+      window.location.href = '/login';
+    }
+  };
 

@@ -709,6 +709,10 @@ pre code.hljs {
     color: var(--color-primary);
 }
 
+.material-symbols-rounded {
+    user-select: none;
+  }
+
 /* =======================================
    WELCOME CONTAINER
 ======================================= */
