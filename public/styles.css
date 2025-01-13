@@ -41,7 +41,7 @@
     --border-radius: 8px;
     --input-padding: 10px;
     --icon-size: 36px;
-    --font-size-base: 12px;
+    --font-size-base: 0.85rem;
     --transition-duration: 0.3s;
 
     /* Z-Indices */
@@ -150,10 +150,6 @@ body.no-chat-scroll .chat-window {
     padding-right: 10px;
 }
 
-.chat-title {
-    font-size: 0.875rem;
-}
-
 .chat-item {
     display: flex;
     align-items: start;
@@ -163,11 +159,27 @@ body.no-chat-scroll .chat-window {
     line-height: 1.4;
     font-weight: 400;
     cursor: pointer;
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
     padding: 10px;
     border-radius: var(--border-radius);
 }
 
+.chat-item .chat-title {
+    display: inline-block;     
+    max-width: 80%;           
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.875rem;
+}
+
 .chat-item:hover {
+    background-color: var(--color-ai-msg-bg);
+}
+
+.chat-item.active {
     background-color: var(--color-ai-msg-bg);
 }
 
@@ -424,6 +436,7 @@ ul.chat-category-list {
 .ai .message-content .message-body .message-text {
     margin: 0;
     font-size: 1rem;
+    text-align: left;
 }
 
 .ai .message-content .message-body .message-text ul {
@@ -700,14 +713,14 @@ pre code.hljs {
     transition: color 0.2s;
 }
 
-.ai .message-content .message-body .copy-button {
-    margin-left: 10px;
-}
-
 .copy-button:hover,
 .copy-button:active {
     color: var(--color-primary);
 }
+
+.material-symbols-rounded {
+    user-select: none;
+  }
 
 /* =======================================
    WELCOME CONTAINER
@@ -988,6 +1001,39 @@ pre code.hljs {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+
+.pdf-modal {
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    display: none; /* Hidden by default; shown via JS */
+    background-color: rgba(0, 0, 0, 0.7);
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .pdf-modal-content {
+    position: relative;
+    width: 80%;
+    height: 80%;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    overflow: hidden; /* important so the iframe doesn't expand beyond container */
+  }
+  
+  .pdf-close-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 32px;
+    font-weight: bold;
+    color: #333;
+    cursor: pointer;
+    z-index: 1000;
+  }
 
 /* =======================================
    RESPONSIVE MEDIA QUERIES

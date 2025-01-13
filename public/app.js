@@ -1,61 +1,3 @@
-// Generate a new chatId on page load
-// Load the chat history when the page loads
-window.onload = async () => {
-    console.log("window.onload: Starting user-info fetch...");
-
-    try {
-        // (Optional) newChatBtn.disabled = true;
-
-        debugSessionStorage("BEFORE /user-info fetch (window.onload)");
-
-        const response = await fetch('/user-info', {
-            credentials: 'include',
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        });
-
-        if (response.status === 401) {
-            console.warn("window.onload: /user-info => 401 Unauthorized => /login");
-            window.location.href = '/login';
-            return;
-        }
-        if (!response.ok) {
-            throw new Error(`HTTP error from /user-info! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log("window.onload: /user-info =>", data);
-
-        sessionStorage.setItem('userId', data.userId);
-        sessionStorage.setItem('userName', data.userName);
-
-        console.log("window.onload: set userId =", data.userId);
-        console.log("window.onload: set userName =", data.userName);
-
-        chatId = sessionStorage.getItem('chatId') || generateChatId();
-        sessionStorage.setItem('chatId', chatId);
-
-        console.log("window.onload: final chatId =", chatId);
-
-        debugSessionStorage("AFTER storing user info (window.onload)");
-
-        await loadChatHistory();
-        showWelcomeScreen();
-
-        // Just to check again:
-        debugSessionStorage("AFTER loadChatHistory & showWelcomeScreen");
-
-        // newChatBtn.disabled = false;
-
-        console.log("window.onload: Done initialization.");
-    } catch (error) {
-        console.error('Error in window.onload:', error);
-        window.location.href = '/login';
-    }
-};
-
 let chatId;
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -77,9 +19,9 @@ const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
 const newChatBtn = document.getElementById('new-chat-btn');
 const fileUpload = document.getElementById('file-upload');
-const attachIcon = document.getElementById('attach-icon'); // Attach icon reference
+const attachIcon = document.getElementById('attach-icon');
 
-let isTutorModeOn = false; // Track the state of Tutor Mode
+let isTutorModeOn = false;
 
 const tutorModeButton = document.getElementById('tutor-mode-button');
 const tutorModeDropdown = document.getElementById('tutor-mode-dropdown');
@@ -87,7 +29,6 @@ const dropdownItems = document.querySelectorAll('#tutor-mode-dropdown .dropdown-
 
 const inputContainer = document.querySelector('.input-container');
 
-// Add drag-and-drop event listeners
 inputContainer.addEventListener('dragenter', handleDragEnter, false);
 inputContainer.addEventListener('dragover', handleDragOver, false);
 inputContainer.addEventListener('dragleave', handleDragLeave, false);
@@ -108,8 +49,6 @@ function handleFirstTab(e) {
     }
 }
 
-// This function listens for the first mouse click after a Tab press.
-// When a mouse is used, we remove the 'user-is-tabbing' class.
 function handleMouseDownOnce() {
     document.body.classList.remove('user-is-tabbing');
     window.removeEventListener('mousedown', handleMouseDownOnce);
@@ -125,9 +64,9 @@ function updateCheckmark() {
         const selectedMode = item.getAttribute('data-mode');
         const checkmark = item.querySelector('.checkmark');
         if ((isTutorModeOn && selectedMode === 'tutor') || (!isTutorModeOn && selectedMode === 'normal')) {
-            checkmark.style.display = 'inline'; // Show the checkmark for the active item
+            checkmark.style.display = 'inline'; 
         } else {
-            checkmark.style.display = 'none'; // Hide the checkmark for inactive items
+            checkmark.style.display = 'none'; 
         }
     });
 }
@@ -170,23 +109,19 @@ function displayPopup(message) {
     // Create a close button
     const closeButton = document.createElement('span');
     closeButton.classList.add('popup-close-button');
-    closeButton.textContent = '×'; // Unicode multiplication sign
+    closeButton.textContent = '×'; 
 
-    // Add click event to close the popup
     closeButton.addEventListener('click', () => {
         popupContainer.remove();
     });
 
-    // Append message and close button to the container
     popupContainer.appendChild(popupMessage);
     popupContainer.appendChild(closeButton);
 
-    // Insert the popup container above the input-container
     const chatWindow = document.querySelector('.chat-window');
     const inputContainer = document.querySelector('.input-container');
     chatWindow.insertBefore(popupContainer, inputContainer);
 
-    // Optional: Auto-remove the popup after a certain time (e.g., 5 seconds)
     setTimeout(() => {
         popupContainer.remove();
     }, 5000);
@@ -218,7 +153,6 @@ async function sendMessage(message) {
         if (response.status === 429) {
             const { retryAfter } = await response.json();
             displayRateLimitMessage(retryAfter);
-            // Return null to indicate we should not append the user's message
             return null;
         }
 
@@ -243,7 +177,7 @@ async function sendMessage(message) {
 function displayRateLimitMessage(retryAfter) {
     const chatBox = document.getElementById('chat-box');
     const messageElement = document.createElement('div');
-    messageElement.classList.add('message', 'ai'); // Apply AI message styling (assuming 'ai' or 'ai-message' class)
+    messageElement.classList.add('message', 'ai'); 
     
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
@@ -277,13 +211,29 @@ function displayRateLimitMessage(retryAfter) {
 }
 
 
-// Handle clicking the attach icon to trigger the file input
-attachIcon.addEventListener('click', () => {
-    //fileUpload.click(); // Manually trigger the file input
-});
+// // Handle clicking the attach icon to trigger the file input
+// attachIcon.addEventListener('click', () => {
+//     //fileUpload.click(); // Manually trigger the file input
+// });
 
 function isDevelopment() {
     return window.location.hostname === 'localhost';
+}
+
+function highlightActiveChat() {
+    // Remove all existing .active classes
+    document.querySelectorAll('.chat-item.active').forEach(item => {
+        item.classList.remove('active');
+    });
+
+    // Figure out which chatId is currently “active”
+    const currentChatId = sessionStorage.getItem('chatId');
+    if (!currentChatId) return; 
+
+    const chatItem = document.querySelector(`.chat-item[data-chat-id="${currentChatId}"]`);
+    if (chatItem) {
+        chatItem.classList.add('active');
+    }
 }
 
 // Load existing chats from history and categorize them
@@ -307,6 +257,8 @@ async function loadChatHistory() {
         }
 
         const chats = await res.json();
+
+        highlightActiveChat();
 
         // Clear the existing chat history list
         chatHistoryList.innerHTML = '';
@@ -336,8 +288,24 @@ async function loadChatHistory() {
                 chatItem.setAttribute('role', 'group');
                 chatItem.setAttribute('aria-label', `Chat item for ${sanitizeText(chat.title)}`);
 
+                // Instead of alt, use "title" here:
+                chatItem.setAttribute('title', chat.title); 
+
                 // Add click event listener to load chat
                 chatItem.addEventListener('click', () => loadChat(chat.chatId));
+
+                chatItem.addEventListener('click', () => {
+                    // First remove the active class from any currently active items
+                    document.querySelectorAll('.chat-item.active').forEach(item => {
+                      item.classList.remove('active');
+                    });
+                  
+                    // Then add active class to this one
+                    chatItem.classList.add('active');
+                  
+                    // Finally, load the selected chat
+                    loadChat(chat.chatId);
+                  });
 
                 // Add focus and blur event listeners for active state
                 chatItem.addEventListener('focus', () => chatItem.classList.add('active'));
@@ -347,8 +315,8 @@ async function loadChatHistory() {
                 const chatTitle = document.createElement('span');
                 chatTitle.textContent = sanitizeText(chat.title);
                 chatTitle.classList.add('chat-title');
-                chatTitle.setAttribute('tabindex', '0'); // Make focusable
-                chatTitle.setAttribute('role', 'button'); // Semantics for screen readers
+                chatTitle.setAttribute('tabindex', '0'); 
+                chatTitle.setAttribute('role', 'button'); 
                 chatTitle.setAttribute('aria-label', `Chat titled ${sanitizeText(chat.title)}`);
 
                 // Attach input validation logic to the chat title
@@ -376,7 +344,7 @@ async function loadChatHistory() {
 
                 // Add click event to delete the chat
                 binIconButton.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent click from triggering loadChat
+                    e.stopPropagation(); 
                     deleteChat(chat.chatId);
                 });
 
@@ -401,19 +369,19 @@ async function loadChatHistory() {
 
 // Helper function to sanitize chat titles
 function sanitizeText(text) {
-    return text.replace(/[^a-zA-Z0-9\s]/g, ''); // Allow only alphanumeric characters and spaces
+    return text.replace(/[^a-zA-Z0-9\s]/g, '');
 }
 
 // Helper function to validate chat title input dynamically
 function validateChatTitle(inputElement) {
-    const sanitizedText = inputElement.textContent.replace(/[^a-zA-Z0-9\s]/g, ''); // Remove invalid characters
+    const sanitizedText = inputElement.textContent.replace(/[^a-zA-Z0-9\s]/g, ''); 
     if (inputElement.textContent !== sanitizedText) {
-        inputElement.textContent = sanitizedText; // Update if invalid characters are removed
+        inputElement.textContent = sanitizedText;
     }
 }
 
 function createScrollTable(index, element) {
-    const root = element; // element is a DOM element, not a jQuery object
+    const root = element;
     const icon = root.querySelector(".swipe-icon");
     const table = root.querySelector(".table-responsive");
     const accessibleMessage = root.querySelector(".accessible-message");
@@ -455,7 +423,7 @@ function createScrollTable(index, element) {
 function showWelcomeScreen() {
     const welcomeContainer = document.getElementById('welcome-container');
     const userName = sessionStorage.getItem('userName') || 'User';
-    welcomeContainer.style.display = 'block'; // Show the welcome screen
+    welcomeContainer.style.display = 'block';
     const welcomeMessage = welcomeContainer.querySelector('p');
     welcomeMessage.textContent = `Welcome ${userName} to KaplanGPT! This is a secure and welcoming environment where you can freely explore. Feel free to engage in conversation with me.`;
 }
@@ -463,7 +431,7 @@ function showWelcomeScreen() {
 
 // Function to load a previous chat by chatId
 async function loadChat(chatIdToLoad) {
-    chatId = chatIdToLoad; // Set chatId to the one being loaded
+    chatId = chatIdToLoad;
     sessionStorage.setItem('chatId', chatId);
 
     const res = await fetch(`/chats/${chatId}`);
@@ -570,11 +538,6 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const messageContent = document.createElement("div");
     messageContent.classList.add("message-content");
 
-    // Regex pattern now includes:
-    // - $$...$$
-    // - \( ... \)
-    // - $...$
-    // - \[ ... \]
     const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
 
     function processTextWithMarkdownAndMath(text) {
@@ -614,14 +577,13 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
         const parts = message.split(codeBlockRegex);
 
-        let language = ''; // Captures the language from the regex
+        let language = '';
 
         parts.forEach((part, index) => {
             const safePart = (part || '').trim();
 
             // Every 3rd part is either text or code based on index
             if (index % 3 === 0) {
-                // Regular text may contain markdown & math
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
@@ -755,7 +717,14 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
     messageElement.appendChild(messageContent);
     chatBox.appendChild(messageElement);
+
+    // Always scroll chat box to bottom
     chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Also scroll entire page to bottom for new user messages
+    if (sender === "You") {
+        window.scrollTo(0, document.body.scrollHeight);
+    }
 
     // Dynamically typeset MathJax for the newly added message element
     if (window.MathJax && MathJax.typesetPromise) {
@@ -778,10 +747,10 @@ function generateChatId() {
 let selectedImageFile = null;
 
 // Handle file upload and sending message
-let fileUploadInProgress = false;  // Flag to prevent multiple uploads
+let fileUploadInProgress = false; 
 
 fileUpload.addEventListener('change', async function () {
-    if (fileUploadInProgress) return;  // Prevent multiple uploads
+    if (fileUploadInProgress) return; 
     fileUploadInProgress = true;
 
     const files = fileUpload.files;
@@ -818,7 +787,7 @@ fileUpload.addEventListener('change', async function () {
                 // Not an image, upload it immediately via /upload endpoint
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('chatId', chatId); // Ensure chatId is sent along with the file
+                formData.append('chatId', chatId);
 
                 try {
                     const response = await fetch('/upload', {
@@ -872,18 +841,18 @@ function appendFileLink(fileName, fileUrl) {
     
     // Create a container for the file link
     const fileElement = document.createElement('div');
-    fileElement.classList.add('file-upload-container', 'user'); // Align with user messages
+    fileElement.classList.add('file-upload-container', 'user');
     
     const messageContent = document.createElement('div');
-    messageContent.classList.add('message-content'); // Will flex items in a row
+    messageContent.classList.add('message-content');
 
     // Determine if the file is an image based on its extension
     const isImage = /\.(jpeg|jpg|gif|png|bmp|svg|tif|heic)$/i.test(fileName);
 
     // Create a link to hold both the icon and file name
     const fileIconLink = document.createElement('a');
-    fileIconLink.href = fileUrl || '#'; // Use '#' if no valid URL
-    fileIconLink.classList.add('file-link'); // Optional class for styling
+    fileIconLink.href = fileUrl || '#'; 
+    fileIconLink.classList.add('file-link');
 
     // Decide which Material Icon to display
     const fileIcon = document.createElement('span');
@@ -896,7 +865,7 @@ function appendFileLink(fileName, fileUrl) {
             e.preventDefault();
             showImageModal(fileUrl);
         });
-        fileIconLink.style.cursor = 'pointer'; // Indicate clickability
+        fileIconLink.style.cursor = 'pointer';
     } 
     // Otherwise, open in a new tab
     else if (fileUrl) {
@@ -921,9 +890,30 @@ function appendFileLink(fileName, fileUrl) {
     deleteButton.textContent = 'delete';
     deleteButton.title = 'Delete this file message';
 
-    // Clicking the bin removes the entire file message
-    deleteButton.addEventListener('click', () => {
-        chatBox.removeChild(fileElement);
+    // Clicking the bin calls our DELETE route, then removes from DOM on success
+    deleteButton.addEventListener('click', async () => {
+        try {
+            console.log(`[appendFileLink] Attempting to delete file "${fileName}" from chatId=${chatId}`);
+
+            // Encode filename for URL safety
+            const encodedFileName = encodeURIComponent(fileName);
+
+            const resp = await fetch(`/chats/${chatId}/files/${encodedFileName}`, {
+                method: 'DELETE',
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                console.error('[appendFileLink] DELETE file failed =>', err.error || resp.statusText);
+                displayPopup(`Error removing file from chat: ${err.error || resp.statusText}`);
+            } else {
+                console.log(`[appendFileLink] File "${fileName}" deleted successfully. Removing from DOM...`);
+                chatBox.removeChild(fileElement);
+            }
+        } catch (err) {
+            console.error('[appendFileLink] Error calling DELETE for file:', err);
+            displayPopup(`Error deleting file: ${err}`);
+        }
     });
 
     // Add delete button to the message
@@ -946,13 +936,11 @@ function toggleSidebar() {
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
     const chatWindow = document.querySelector('.chat-window');
-    const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
     const inputContainer = document.querySelector('.input-container');
     const inputBackground = document.querySelector('.input-background');
 
     if (sidebar.classList.contains('collapsed')) {
-        // Sidebar is currently collapsed, so let's expand it
         sidebar.classList.remove('collapsed');
         chatBox.classList.remove('collapsed');
         collapseBtn.textContent = 'left_panel_close';
@@ -961,16 +949,14 @@ function toggleSidebar() {
         iconContainer.classList.remove('collapsed');
         inputBackground.classList.remove('collapsed');
 
-        document.body.classList.remove('no-chat-scroll'); // Remove class when expanded
+        document.body.classList.remove('no-chat-scroll');
 
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
         inputBackground.classList.add('active');
     } else {
-        // Sidebar is currently expanded, so let's collapse it
         sidebar.classList.add('collapsed');
         chatBox.classList.add('collapsed');
         collapseBtn.textContent = 'left_panel_open';
@@ -979,13 +965,14 @@ function toggleSidebar() {
         iconContainer.classList.add('collapsed');
         inputBackground.classList.add('collapsed');
 
-        document.body.classList.add('no-chat-scroll'); // Add class when collapsed
+        document.body.classList.add('no-chat-scroll');
 
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
+
+        window.scrollTo(0, document.body.scrollHeight);
     }
 }
 
@@ -994,13 +981,11 @@ function initializeActiveState() {
     const collapseBtn = document.getElementById('collapse-btn');
     const newChatBtn = document.getElementById('new-chat-btn');
     const attachIcon = document.getElementById('attach-icon');
-    //const tutorModeButton = document.getElementById('tutor-mode-button');
     const iconContainer = document.querySelector('.icon-container');
 
     iconContainer.addEventListener('keydown', function(event) {
         if (event.key === 'ArrowDown') {
             event.preventDefault();
-            // Move focus to the first chatItem
             const firstChatItem = document.querySelector('.chat-item');
             if (firstChatItem) {
                 firstChatItem.focus();
@@ -1009,18 +994,14 @@ function initializeActiveState() {
     });
 
     if (!sidebar.classList.contains('collapsed')) {
-        // Sidebar is open, add 'active' class to icons and icon-container
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
-        //tutorModeButton.classList.add('active');
         iconContainer.classList.add('active');
     } else {
-        // Sidebar is collapsed, remove 'active' class from icons and icon-container
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
-        //tutorModeButton.classList.remove('active');
         iconContainer.classList.remove('active');
     }
 }
@@ -1087,7 +1068,6 @@ sendBtn.addEventListener('click', async () => {
         // If we hit a rate limit or there's no response
         if (response === null) {
             console.warn("sendBtn: response is null (rate limit or error). Removing user message & loader...");
-            // Remove the user's message and loading message
             if (userMessageElement && userMessageElement.parentNode) {
                 userMessageElement.parentNode.removeChild(userMessageElement);
             }
@@ -1102,7 +1082,6 @@ sendBtn.addEventListener('click', async () => {
         console.log("  sendBtn: AI responded, streaming AI response into messageContent =", messageContent);
         streamParsedResponse(messageContent, response);
 
-        // After that, **await** loadChatHistory to refresh the sidebar:
         console.log("  sendBtn: calling loadChatHistory after AI response");
         try {
             await loadChatHistory();
@@ -1164,17 +1143,14 @@ chatInput.addEventListener('keydown', async (event) => {
             }
 
             if (response) {
-                // If we got a successful response, handle AI message streaming
                 const messageContent = loadingMessageElement.querySelector('.message-content');
                 streamParsedResponse(messageContent, response);
 
-                // === KEY FIX: Wait for loadChatHistory so the sidebar refreshes properly ===
                 try {
                     await loadChatHistory();
                 } catch (err) {
                     console.error('Error loading chat history:', err);
                 }
-                // === END FIX ===
             } else {
                 console.error('Response is undefined.');
             }
@@ -1187,7 +1163,6 @@ chatInput.addEventListener('keydown', async (event) => {
 sendBtn.addEventListener('keydown', function(event) {
     if (event.key === 'Tab' && !event.shiftKey) {
         event.preventDefault();
-        // Move focus to the first chatItem
         const firstChatItem = document.querySelector('.chat-item');
         if (firstChatItem) {
             firstChatItem.focus();
@@ -1196,21 +1171,20 @@ sendBtn.addEventListener('keydown', function(event) {
 });
 
 function streamMessageFromServer() {
-    const eventSource = new EventSource('/chat-stream'); // Adjust the endpoint if needed
+    const eventSource = new EventSource('/chat-stream');
 
     eventSource.onmessage = function (event) {
         const content = event.data;
         if (content === '[DONE]') {
-            eventSource.close(); // Close the stream when done
+            eventSource.close();
         } else {
-            // Append the content to the chat as it arrives
             appendMessage('AI', content);
         }
     };
 
     eventSource.onerror = function (event) {
         console.error('Error in event source:', event);
-        eventSource.close(); // Close the stream on error
+        eventSource.close();
     };
 }
 
@@ -1236,14 +1210,14 @@ function streamParsedResponse(messageContent, rawResponseText) {
     }
 
     // We'll stream the text as plain text first, then do a final parse at the end
-    messageText.textContent = ''; // Ensure empty at start of streaming
+    messageText.textContent = '';
 
-    const words = rawResponseText.split(/(\s+)/); // Split by spaces, keeping them
+    const words = rawResponseText.split(/(\s+)/); 
     let currentWordIndex = 0;
     let accumulatedText = '';
 
-    const intervalSpeed = 10; // Faster interval for smoother streaming
-    const maxWordsPerChunk = 5; // Append a few words per iteration for even smoother streaming
+    const intervalSpeed = 10;
+    const maxWordsPerChunk = 5;
 
     const wordInterval = setInterval(() => {
         if (currentWordIndex < words.length) {
@@ -1259,7 +1233,6 @@ function streamParsedResponse(messageContent, rawResponseText) {
             chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
         } else {
             clearInterval(wordInterval);
-
             // Streaming done, now we do the final parsing & formatting
             finalizeResponseFormatting(messageBody, accumulatedText);
         }
@@ -1267,8 +1240,6 @@ function streamParsedResponse(messageContent, rawResponseText) {
 }
 
 function finalizeResponseFormatting(messageBody, rawResponseText) {
-    // Now parse markdown, handle code blocks, math, etc.
-    // Clear existing content
     messageBody.innerHTML = '';
 
     reRenderMessageWithCodeBlocks(messageBody, rawResponseText);
@@ -1350,18 +1321,16 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
     let entireMessage = '';
 
     const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
+
     // Safely split text by code blocks
     const parts = rawResponseText ? rawResponseText.split(codeBlockRegex) : [''];
-
-    // Track language for code blocks
     let language = '';
-
 
     for (let i = 0; i < parts.length; i++) {
         const currentPart = parts[i] || '';
 
         if (i % 3 === 0) {
-            // Regular text
+            // Regular text parts
             const textToProcess = currentPart.trim();
             const messageText = document.createElement('div');
             messageText.classList.add('message-text');
@@ -1369,17 +1338,17 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const finalHTML = processTextWithMarkdownAndMath(textToProcess);
             messageText.innerHTML = finalHTML;
 
-            // Example: add .table class
+            // Basic table styling
             const tables = messageText.querySelectorAll('table');
             tables.forEach((table) => {
-                table.classList.add('table'); 
+                table.classList.add('table');
             });
 
             messageBody.appendChild(messageText);
             entireMessage += textToProcess;
 
         } else if (i % 3 === 1) {
-            // Possible language specified
+            // Language for the code block
             language = currentPart ? currentPart.trim() : '';
 
         } else if (i % 3 === 2) {
@@ -1388,7 +1357,7 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             const codeBlock = document.createElement('div');
             codeBlock.classList.add('code-block-container');
 
-            // Code block header
+            // ADDED: Code block header
             const codeBlockHeader = document.createElement('div');
             codeBlockHeader.classList.add('code-block-header');
             codeBlockHeader.textContent = language ? language : 'Code';
@@ -1404,10 +1373,8 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
             codeContent.textContent = codeContentText;
             codeElement.appendChild(codeContent);
 
-            // Highlight.js
             hljs.highlightElement(codeContent);
 
-            // Inline copy button for code
             const codeCopyButton = document.createElement('span');
             codeCopyButton.classList.add('material-symbols-rounded', 'code-copy-button');
             codeCopyButton.textContent = 'content_copy';
@@ -1428,56 +1395,27 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
         }
     }
 
-    // === Entire message copy button ===
+    // Entire message copy button
     const copyButtonContainer = document.createElement('div');
     copyButtonContainer.classList.add('copy-button-container');
 
     const copyButton = document.createElement('span');
     copyButton.classList.add('material-symbols-rounded', 'copy-button');
     copyButton.textContent = 'content_copy';
-
     copyButtonContainer.appendChild(copyButton);
+
     messageBody.appendChild(copyButtonContainer);
 
-    // Click => copy entire message, preserving HTML if a table is present
-    copyButton.addEventListener('click', async () => {
-        try {
-          const tableElement = messageBody.querySelector('table');
-      
-          if (tableElement) {
-            // 1) The entire rendered HTML:
-            const htmlString = messageBody.innerHTML;
-      
-            // 2) Create a Blob for HTML, and another for text fallback
-            const htmlBlob = new Blob([htmlString], { type: 'text/html' });
-            const textBlob = new Blob([htmlString], { type: 'text/plain' });
-      
-            // 3) Construct a multi-part ClipboardItem
-            const clipboardItems = [
-              new ClipboardItem({
-                'text/html': htmlBlob,
-                'text/plain': textBlob,
-              })
-            ];
-      
-            // 4) Write to the clipboard
-            await navigator.clipboard.write(clipboardItems);
-      
+    copyButton.addEventListener('click', () => {
+        navigator.clipboard.writeText(entireMessage).then(() => {
             copyButton.textContent = 'done';
-            setTimeout(() => copyButton.textContent = 'content_copy', 2000);
-      
-          } else {
-            // If no table, just copy text
-            // e.g., old fallback
-            const plainText = messageBody.innerText;
-            await navigator.clipboard.writeText(plainText);
-          }
-        } catch (err) {
-          console.error('Error copying:', err);
-        }
-      });
+            setTimeout(() => {
+                copyButton.textContent = 'content_copy';
+            }, 2000);
+        });
+    });
 
-    // Typeset MathJax again if available
+    // Typeset MathJax again
     if (window.MathJax && MathJax.typesetPromise) {
         MathJax.typesetPromise([messageBody])
             .catch(err => console.error("MathJax rendering failed:", err));
@@ -1489,26 +1427,25 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
 // Function to reset the input height after sending a message
 function resetInputHeight() {
     const input = document.getElementById("chat-input");
-    input.style.height = '20px'; // Reset to initial height
-    input.style.overflowY = 'hidden'; // Hide scrollbar when resetting
+    input.style.height = '20px'; 
+    input.style.overflowY = 'hidden'; 
 }
 
 // Auto-growing input logic
 function autoGrowInput() {
     const input = document.getElementById("chat-input");
-    input.style.height = "20px"; // Set to default height first
-    input.style.overflowY = "hidden"; // Ensure overflow is hidden initially
+    input.style.height = "20px"; 
+    input.style.overflowY = "hidden";
 
     // Check if the content height exceeds the current height, and grow as needed
     if (input.scrollHeight > input.clientHeight) {
-        input.style.height = input.scrollHeight + "px"; // Set to the scrollHeight to grow dynamically
-        input.style.overflowY = input.scrollHeight > 300 ? "auto" : "hidden"; // Show scrollbar if exceeds max height
+        input.style.height = input.scrollHeight + "px";
+        input.style.overflowY = input.scrollHeight > 300 ? "auto" : "hidden";
     }
 }
 
 // Existing event listener for input event
 chatInput.addEventListener('input', () => {
-    // Automatically grow the input field as the user types
     autoGrowInput();
 
     // Change the color of the send button if input has content
@@ -1533,7 +1470,7 @@ chatInput.addEventListener('blur', () => {
 // Function to hide the welcome screen
 function hideWelcomeScreen() {
     const welcomeContainer = document.getElementById('welcome-container');
-    welcomeContainer.style.display = 'none'; // Hide the welcome screen
+    welcomeContainer.style.display = 'none'; 
 }
 
 function updateImageStats(totalCount, totalSize) {
@@ -1567,7 +1504,6 @@ async function sendMessageWithImage(message, imageFiles) {
     for (const img of imageFiles) {
         formData.append('image', img);
     }
-
     try {
         const res = await fetch('/chat', {
             method: 'POST',
@@ -1589,14 +1525,11 @@ async function sendMessageWithImage(message, imageFiles) {
         }
 
         const data = await res.json();
-
         if (data.chatId) {
             chatId = data.chatId;
             sessionStorage.setItem('chatId', chatId);
         }
-
         updateImageStats(data.total_image_count, data.total_image_size);
-
         return data.response;
     } catch (error) {
         console.error('Error sending message with images:', error);
@@ -1615,7 +1548,7 @@ function appendFormula(formula) {
     formulaContainer.innerHTML = `$$${formula}$$`;
 
     chatBox.appendChild(formulaContainer);
-    MathJax.typesetPromise(); // Re-render MathJax equations
+    MathJax.typesetPromise();
 }
 
 let dragCounter = 0;
@@ -1646,12 +1579,12 @@ function handleDragLeave(e) {
 async function handleDrop(e) {
     e.preventDefault();
     e.stopPropagation();
-    dragCounter = 0; // Reset counter on drop
+    dragCounter = 0;
     inputContainer.classList.remove('dragover');
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-        if (fileUploadInProgress) return;  // Prevent multiple uploads
+        if (fileUploadInProgress) return; 
         fileUploadInProgress = true;
 
         for (const file of files) {
@@ -1662,28 +1595,19 @@ async function handleDrop(e) {
                     displayPopup(`Image type .${fileExtension} not supported`);
                     continue;
                 }
-
-                // It's a supported image, add it to the selectedImageFiles array
                 selectedImageFiles.push(file);
 
-                // Generate a blob URL for the image
                 const imageUrl = URL.createObjectURL(file);
-
-                // Display the image link in the chat
                 appendFileLink(file.name, imageUrl);
 
-                // Change the attach icon to 'done'
                 attachIcon.textContent = "done";
-
-                // Revert after 2 seconds
                 setTimeout(() => {
                     attachIcon.textContent = "attach_file";
                 }, 2000);
             } else {
-                // Not an image, upload it immediately via /upload endpoint
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('chatId', chatId); // Ensure chatId is sent along with the file
+                formData.append('chatId', chatId);
 
                 try {
                     const response = await fetch('/upload', {
@@ -1726,23 +1650,30 @@ async function handleDrop(e) {
 
 // Add event listeners for chat-title validation
 document.addEventListener("DOMContentLoaded", () => {
-    const chatTitleElements = document.querySelectorAll('.chat-title'); // Select all elements with the class 'chat-title'
+    const chatTitleElements = document.querySelectorAll('.chat-title'); 
     chatTitleElements.forEach(chatTitle => {
-        chatTitle.addEventListener('input', () => validateChatTitle(chatTitle)); // Validate on input
+        chatTitle.addEventListener('input', () => validateChatTitle(chatTitle));
     });
 });
 
 
-function deleteChat(chatId) {
-    fetch(`/chats/${chatId}`, {
+function deleteChat(chatIdToDelete) {
+    fetch(`/chats/${chatIdToDelete}`, {
         method: 'DELETE',
     })
-    .then(response => {
-        if (response.ok) {
-            // Reload the chat history to reflect the changes
-            loadChatHistory();
-        } else {
+    .then(async response => {
+        if (!response.ok) {
             console.error('Failed to delete chat');
+            return;
+        }
+
+        // Reload chat history so the sidebar no longer shows the deleted chat
+        await loadChatHistory();
+        //potentially change to just chatID
+        if (chatIdToDelete === chatId) {
+            newChatBtn.click();
+        } else {
+            highlightActiveChat();
         }
     })
     .catch(error => {
@@ -1769,12 +1700,11 @@ function createImageModal() {
 
     const closeBtn = document.createElement('span');
     closeBtn.classList.add('close-btn');
-    closeBtn.innerHTML = '&times;'; // Unicode multiplication sign
+    closeBtn.innerHTML = '&times;';
 
     // Add click event to close the modal
     closeBtn.addEventListener('click', () => {
         modal.style.display = 'none';
-        // We do NOT revokeObjectURL here because we may need to show the same image again.
     });
 
     // Close modal when clicking outside the image
@@ -1801,4 +1731,52 @@ function showImageModal(imageUrl) {
     modal.style.display = 'flex'; // Show the modal
 }
 
-
+window.onload = async () => {
+    console.log("window.onload: Starting user-info fetch...");
+  
+    try {
+      debugSessionStorage("BEFORE /user-info fetch (window.onload)");
+  
+      const response = await fetch('/user-info', {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+  
+      if (response.status === 401) {
+        console.warn("window.onload: /user-info => 401 => /login");
+        window.location.href = '/login';
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP error from /user-info! status: ${response.status}`);
+      }
+  
+      const data = await response.json();
+      console.log("window.onload: /user-info =>", data);
+  
+      // Store user info in sessionStorage
+      sessionStorage.setItem('userId', data.userId);
+      sessionStorage.setItem('userName', data.userName);
+      console.log("window.onload: set userId =", data.userId);
+      console.log("window.onload: set userName =", data.userName);
+  
+      chatId = generateChatId();
+      sessionStorage.setItem('chatId', chatId);
+      console.log("window.onload: Forcing brand-new chatId on every refresh:", chatId);
+  
+      debugSessionStorage("AFTER /user-info fetch and chatId setup");
+  
+      // Proceed with loading the chat history, showing welcome, etc.
+      await loadChatHistory();
+      showWelcomeScreen();
+      debugSessionStorage("AFTER loadChatHistory & showWelcomeScreen");
+  
+      console.log("window.onload: Done initialization.");
+    } catch (error) {
+      console.error('Error in window.onload:', error);
+      window.location.href = '/login';
+    }
+  };
