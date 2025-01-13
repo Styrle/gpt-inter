@@ -150,10 +150,6 @@ body.no-chat-scroll .chat-window {
     padding-right: 10px;
 }
 
-.chat-title {
-    font-size: 0.875rem;
-}
-
 .chat-item {
     display: flex;
     align-items: start;
@@ -163,11 +159,27 @@ body.no-chat-scroll .chat-window {
     line-height: 1.4;
     font-weight: 400;
     cursor: pointer;
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
     padding: 10px;
     border-radius: var(--border-radius);
 }
 
+.chat-item .chat-title {
+    display: inline-block;     
+    max-width: 80%;           
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.875rem;
+}
+
 .chat-item:hover {
+    background-color: var(--color-ai-msg-bg);
+}
+
+.chat-item.active {
     background-color: var(--color-ai-msg-bg);
 }
 
@@ -424,6 +436,7 @@ ul.chat-category-list {
 .ai .message-content .message-body .message-text {
     margin: 0;
     font-size: 1rem;
+    text-align: left;
 }
 
 .ai .message-content .message-body .message-text ul {
@@ -698,10 +711,6 @@ pre code.hljs {
     color: #888;
     font-size: 18px;
     transition: color 0.2s;
-}
-
-.ai .message-content .message-body .copy-button {
-    margin-left: 10px;
 }
 
 .copy-button:hover,
