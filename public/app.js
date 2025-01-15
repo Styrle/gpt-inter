@@ -55,6 +55,19 @@ function handleMouseDownOnce() {
     window.addEventListener('keydown', handleFirstTab);
 }
 
+function setActiveChat(chatId) {
+    // Remove .active from any currently-active items
+    document.querySelectorAll('.chat-item.active').forEach(item => {
+      item.classList.remove('active');
+    });
+  
+    // Find the matching chatItem
+    const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+    if (chatItem) {
+      chatItem.classList.add('active');
+    }
+  }
+
 // Add initial event listeners on page load
 window.addEventListener('keydown', handleFirstTab);
 
@@ -276,55 +289,57 @@ async function loadChatHistory() {
             categoryItem.textContent = category;
             categoryItem.classList.add('chat-category-list');
             chatHistoryList.appendChild(categoryItem);
-
+        
             const chatItems = document.createElement('ul');
-            const reversedChats = chats[category].slice().reverse();
-
-            for (const chat of reversedChats) {
+            
+            // Sort each category's array by timestamp descending
+            chats[category].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+            for (const chat of chats[category]) {
                 // Create the chat item container
                 const chatItem = document.createElement('li');
                 chatItem.dataset.chatId = chat.chatId;
                 chatItem.classList.add('chat-item');
                 chatItem.setAttribute('role', 'group');
                 chatItem.setAttribute('aria-label', `Chat item for ${sanitizeText(chat.title)}`);
-
+        
                 // Instead of alt, use "title" here:
                 chatItem.setAttribute('title', chat.title); 
-
+        
                 // Add click event listener to load chat
                 chatItem.addEventListener('click', () => loadChat(chat.chatId));
-
+        
                 chatItem.addEventListener('click', () => {
                     // First remove the active class from any currently active items
                     document.querySelectorAll('.chat-item.active').forEach(item => {
-                      item.classList.remove('active');
+                        item.classList.remove('active');
                     });
-                  
+                    
                     // Then add active class to this one
                     chatItem.classList.add('active');
-                  
+                    
                     // Finally, load the selected chat
                     loadChat(chat.chatId);
-                  });
-
+                });
+        
                 // Add focus and blur event listeners for active state
                 chatItem.addEventListener('focus', () => chatItem.classList.add('active'));
                 chatItem.addEventListener('blur', () => chatItem.classList.remove('active'));
-
+        
                 // Create and sanitize the chat title
                 const chatTitle = document.createElement('span');
                 chatTitle.textContent = sanitizeText(chat.title);
                 chatTitle.classList.add('chat-title');
-                chatTitle.setAttribute('tabindex', '0'); 
-                chatTitle.setAttribute('role', 'button'); 
+                chatTitle.setAttribute('tabindex', '0');
+                chatTitle.setAttribute('role', 'button');
                 chatTitle.setAttribute('aria-label', `Chat titled ${sanitizeText(chat.title)}`);
-
+        
                 // Attach input validation logic to the chat title
                 chatTitle.addEventListener('input', () => validateChatTitle(chatTitle));
-
+        
                 // Add click event listener to load chat
                 chatTitle.addEventListener('click', () => loadChat(chat.chatId));
-
+        
                 // Add keyboard event listener for Enter and Space keys
                 chatTitle.addEventListener('keydown', async function (event) {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -332,34 +347,34 @@ async function loadChatHistory() {
                         await loadChat(chat.chatId);
                     }
                 });
-
+        
                 // Create delete button
                 const binIconButton = document.createElement('button');
                 binIconButton.classList.add('bin-icon-button');
                 binIconButton.setAttribute('aria-label', `Delete chat titled ${sanitizeText(chat.title)}`);
-
+        
                 const binIcon = document.createElement('i');
                 binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
                 binIconButton.appendChild(binIcon);
-
+        
                 // Add click event to delete the chat
                 binIconButton.addEventListener('click', (e) => {
-                    e.stopPropagation(); 
+                    e.stopPropagation();
                     deleteChat(chat.chatId);
                 });
-
+        
                 // Append the chat title and delete button to the chat item
                 chatItem.appendChild(chatTitle);
                 chatItem.appendChild(binIconButton);
-
+        
                 // Handle visibility
                 if (chat.visibility !== 1 && chat.visibility !== undefined) {
                     chatItem.style.display = 'none';
                 }
-
+        
                 chatItems.appendChild(chatItem);
             }
-
+        
             chatHistoryList.appendChild(chatItems);
         }
     } catch (error) {
@@ -1051,6 +1066,7 @@ sendBtn.addEventListener('click', async () => {
         // Show AI loading
         const loadingMessageElement = appendMessage('AI', '', null, true);
 
+        resetInputHeight();
         chatInput.value = '';
         sendBtn.classList.remove('active');
 
@@ -1085,6 +1101,7 @@ sendBtn.addEventListener('click', async () => {
         console.log("  sendBtn: calling loadChatHistory after AI response");
         try {
             await loadChatHistory();
+            setActiveChat(chatId);
             console.log("  sendBtn: loadChatHistory finished.");
         } catch (err) {
             console.error('Error loading chat history:', err);
@@ -1113,12 +1130,9 @@ chatInput.addEventListener('keydown', async (event) => {
             // Show AI loading message immediately
             const loadingMessageElement = appendMessage('AI', '', null, true);
 
+            resetInputHeight();
             chatInput.value = '';
             sendBtn.classList.remove('active');
-
-            setTimeout(() => {
-                resetInputHeight();
-            }, 0);
 
             let response;
             try {
@@ -1148,6 +1162,7 @@ chatInput.addEventListener('keydown', async (event) => {
 
                 try {
                     await loadChatHistory();
+                    setActiveChat(chatId);
                 } catch (err) {
                     console.error('Error loading chat history:', err);
                 }
@@ -1427,23 +1442,29 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
 // Function to reset the input height after sending a message
 function resetInputHeight() {
     const input = document.getElementById("chat-input");
-    input.style.height = '20px'; 
-    input.style.overflowY = 'hidden'; 
-}
+    input.style.height = "20px"; 
+    input.style.overflowY = "hidden";
+  }
 
 // Auto-growing input logic
 function autoGrowInput() {
     const input = document.getElementById("chat-input");
-    input.style.height = "20px"; 
-    input.style.overflowY = "hidden";
+    
+    // Let the browser measure it naturally
+    input.style.height = "auto";       
 
-    // Check if the content height exceeds the current height, and grow as needed
-    if (input.scrollHeight > input.clientHeight) {
-        input.style.height = input.scrollHeight + "px";
-        input.style.overflowY = input.scrollHeight > 300 ? "auto" : "hidden";
+    if (input.style.maxHeight > "200px") {
+        input.style.overflowY = "auto";  
+    } else {
+        input.style.overflowY = "hidden";  
     }
-}
-
+  
+    // Then grow to fit current text
+    if (input.scrollHeight > 200) {
+      input.style.overflowY = "auto";
+    }
+    input.style.height = input.scrollHeight + "px";
+  }
 // Existing event listener for input event
 chatInput.addEventListener('input', () => {
     autoGrowInput();
@@ -1669,7 +1690,8 @@ function deleteChat(chatIdToDelete) {
 
         // Reload chat history so the sidebar no longer shows the deleted chat
         await loadChatHistory();
-        //potentially change to just chatID
+        setActiveChat(chatId);
+
         if (chatIdToDelete === chatId) {
             newChatBtn.click();
         } else {
@@ -1771,6 +1793,7 @@ window.onload = async () => {
   
       // Proceed with loading the chat history, showing welcome, etc.
       await loadChatHistory();
+      setActiveChat(chatId);
       showWelcomeScreen();
       debugSessionStorage("AFTER loadChatHistory & showWelcomeScreen");
   
