@@ -1442,29 +1442,28 @@ function reRenderMessageWithCodeBlocks(messageBody, rawResponseText) {
 // Function to reset the input height after sending a message
 function resetInputHeight() {
     const input = document.getElementById("chat-input");
-    input.style.height = "20px"; 
+    input.style.height = "50%";
     input.style.overflowY = "hidden";
   }
 
 // Auto-growing input logic
 function autoGrowInput() {
     const input = document.getElementById("chat-input");
-    
-    // Let the browser measure it naturally
-    input.style.height = "auto";       
 
-    if (input.style.maxHeight > "200px") {
-        input.style.overflowY = "auto";  
+    input.style.height = 'auto'; 
+
+    if (input.scrollHeight > input.offsetHeight) {
+        input.style.height = input.scrollHeight + 'px';
     } else {
-        input.style.overflowY = "hidden";  
+        input.style.height = '';
     }
-  
-    // Then grow to fit current text
+
     if (input.scrollHeight > 200) {
-      input.style.overflowY = "auto";
+        input.style.overflowY = 'auto';
+    } else {
+        input.style.overflowY = 'hidden';
     }
-    input.style.height = input.scrollHeight + "px";
-  }
+}
 // Existing event listener for input event
 chatInput.addEventListener('input', () => {
     autoGrowInput();
