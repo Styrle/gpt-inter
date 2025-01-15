@@ -249,8 +249,8 @@ body.no-chat-scroll .chat-window {
     font-family: var(--font-family-main);
     font-size: var(--font-size-base);
     line-height: 1.4;
+    height: 50%;       
     max-height: 25vh;
-    padding-top: 12px;
     overflow: hidden;
     transition: height 0.2s ease;
 }
