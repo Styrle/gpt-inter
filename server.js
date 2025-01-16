@@ -383,10 +383,9 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     const { message, tutorMode, chatId: providedChatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    // Test condition: If user sends "test-rate-limit" message, respond with a 429 error
-    if (message === "test-rate-limit") {
-        return res.status(429).json({ retryAfter: 10 });
-    }
+    // 1) Log the incoming request body
+    console.log(`[POST /chat] Received body:`, JSON.stringify(req.body, null, 2));
+    console.log(`[POST /chat] User ID:`, userId);
 
     let chatId = providedChatId;
     if (!chatId) {
@@ -394,11 +393,13 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         chatId = `${userId}_chat_${randomNumber}`;
     }
 
-    // If no message and no images, return error
+    // If no message and no images
     if (!message && (!req.files || req.files.length === 0)) {
+        console.warn('[POST /chat] No message or files provided');
         return res.status(400).json({ error: 'Missing message or files' });
     }
 
+    // Fetch or create chat in DB
     let chat = await getChatHistory(chatId);
     const isNewChat = !chat;
 
@@ -415,57 +416,55 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             total_image_count: 0,
             total_image_size: 0,
             total_document_count: 0,
-            total_document_size: 0
+            total_document_size: 0,
         };
     }
+        // Ensure numeric fields
+        if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+        if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-    // Ensure numeric fields
-    if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
-    if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
-
-    // Prepare last 20 messages for context
+    // Prepare last 20 messages
     let messages = chat.messages.slice(-20).map(msg => ({
         role: msg.role,
         content: `[${msg.timestamp}] ${msg.content}`,
         tokens: msg.tokens
     }));
 
-    // Add system message with or without Tutor Mode
+    // Add system message
     const systemMessage = {
         role: 'system',
         content: tutorMode
             ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
             : ENV_SYSTEM_PROMPT.replace('{CURRENT_DATE}', currentDate),
-            timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
     };
     messages.unshift(systemMessage);
 
-    // Build user content array with text and images
+    // Build user content array (text + images)
     let userContentArray = [];
     if (message) {
         userContentArray.push({ type: 'text', text: message });
     }
 
-    // Process multiple images
+    // 2) If we have images, log them & update chat stats
     if (req.files && req.files.length > 0) {
+        console.log('[POST /chat] Number of image files:', req.files.length);
         for (const file of req.files) {
             if (file.mimetype.startsWith('image/')) {
                 const base64Image = file.buffer.toString('base64');
                 const imageUrl = `data:${file.mimetype};base64,${base64Image}`;
+                userContentArray.push({ type: 'image_url', image_url: { url: imageUrl } });
 
-                userContentArray.push({ type: "image_url", image_url: { url: imageUrl } });
-
-                // Update image stats
-                if (typeof chat.total_image_count !== 'number') chat.total_image_count = 0;
-                if (typeof chat.total_image_size !== 'number') chat.total_image_size = 0;
-
-                chat.total_image_count += 1;
-                chat.total_image_size += file.size || 0;
+                // Update stats
+                chat.total_image_count = (chat.total_image_count || 0) + 1;
+                chat.total_image_size = (chat.total_image_size || 0) + (file.size || 0);
+            } else {
+                console.warn('[POST /chat] Non-image file detected; ignoring for now.');
             }
         }
     }
 
-    // Create a user message if we have text or images
+    // Create user message
     if (userContentArray.length > 0) {
         messages.push({
             role: 'user',
@@ -481,14 +480,12 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         });
     }
 
-    // == Incorporate ephemeral text from session (if any) ==
+    // Ephemeral text from session (uploaded docs)
     if (req.session.extractedTexts && req.session.extractedTexts.length > 0) {
-        // Filter only those texts for this particular chatId
         const relevantTexts = req.session.extractedTexts
             .filter(item => item.chatId === chatId)
             .map(item => `From ${item.fileName}: ${item.text}`);
 
-        // If any relevant text, push it as a user message for context
         if (relevantTexts.length > 0) {
             const combinedText = relevantTexts.join('\n\n');
             messages.push({
@@ -498,89 +495,132 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             });
         }
     }
-    // == End ephemeral session content ==
 
-    // Call OpenAI
+    // 3) Prepare the Azure OpenAI request payload
     const payload = {
-        model: 'gpt-4o',
+        model: 'gpt-4o', // Check your actual model name
         messages: messages,
         temperature: 0.7,
+        max_tokens: 2048 // Increase if needed
     };
 
-    const response = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-key': process.env.AZURE_OPENAI_API_KEY,
-        },
-        body: JSON.stringify(payload),
-    });
+    console.log('[POST /chat] Payload to Azure:', JSON.stringify(payload, null, 2));
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error from OpenAI API:', errorText);
-        return res.status(500).json({ error: `OpenAI request failed: ${response.statusText}` });
+    // Make request to Azure
+    let aiResponse = '';
+    let usage = {};
+    let finishReason = '';
+
+    try {
+        const response = await fetch(
+            `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'api-key': process.env.AZURE_OPENAI_API_KEY,
+                },
+                body: JSON.stringify(payload),
+            }
+        );
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Error from OpenAI API:', errorText);
+            return res.status(500).json({ error: `OpenAI request failed: ${response.statusText}` });
+        }
+
+        // 5) Log raw data from Azure
+        const data = await response.json();
+        console.log('[POST /chat] Raw response from Azure:', JSON.stringify(data, null, 2));
+
+        // Extract the content
+        aiResponse = data.choices?.[0]?.message?.content || '';
+        usage = data.usage || {};
+        finishReason = data.choices?.[0]?.finish_reason || '';
+
+        console.log('[POST /chat] AI Response extracted:', aiResponse);
+        console.log('[POST /chat] finish_reason:', finishReason);
+        console.log('[POST /chat] Token usage:', usage);
+
+    } catch (error) {
+        console.error('Error fetching from OpenAI:', error);
+        return res.status(500).json({ error: 'OpenAI fetch threw an exception.' });
     }
 
-    const data = await response.json();
-    const aiResponse = data.choices[0].message.content;
-    const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
-
-    console.log('AI Response:', aiResponse);
-    console.log(`Tokens - Input: ${prompt_tokens}, Output: ${completion_tokens}, Total: ${total_tokens}`);
+    // Check for empty or content-filtered response
+    if (finishReason === 'content_filter' || !aiResponse) {
+        console.warn('[POST /chat] Content filter triggered or empty response. Returning graceful error.');
+        aiResponse = "I'm sorry, but I can’t provide that, it breaks my content filter";
+    }
 
     // Store assistant response
     chat.messages.push({
         role: 'assistant',
         content: aiResponse,
         timestamp: new Date().toISOString(),
-        tokens: completion_tokens,
+        tokens: usage.completion_tokens || 0,
     });
 
-    // Update stats
-    chat.total_tokens_used += total_tokens;
+    // Update chat stats
+    const totalTokens = usage.total_tokens || 0;
+    chat.total_tokens_used += totalTokens;
     chat.total_interactions += 2; // user + assistant
     chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
     chat.timestamp = new Date().toISOString();
 
-    // Generate a title for a new chat
+    // If it's a new chat, generate a title
     if (isNewChat) {
-        const titlePrompt = [
-            { role: 'system', content: 'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.' },
-            { role: 'user', content: message || 'The title should be 5 words or less and contain no quotes.' }
-        ];
+        try {
+            const titlePrompt = [
+                {
+                    role: 'system',
+                    content:
+                        'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.'
+                },
+                {
+                    role: 'user',
+                    content: message || 'The title should be 5 words or less and contain no quotes.'
+                }
+            ];
 
-        const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
+            const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
+            const titleResponse = await fetch(
+                `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'api-key': process.env.AZURE_OPENAI_API_KEY,
+                    },
+                    body: JSON.stringify(titlePayload),
+                }
+            );
 
-        const titleResponse = await fetch(`${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'api-key': process.env.AZURE_OPENAI_API_KEY,
-            },
-            body: JSON.stringify(titlePayload),
-        });
-
-        if (titleResponse.ok) {
-            const titleData = await titleResponse.json();
-            const generatedTitle = titleData.choices[0].message.content.trim();
-            chat.title = generatedTitle;
-        } else {
-            const errorText = await titleResponse.text();
-            console.error('Error generating title:', errorText);
+            if (titleResponse.ok) {
+                const titleData = await titleResponse.json();
+                const generatedTitle = titleData.choices?.[0]?.message?.content?.trim() || 'No Title';
+                chat.title = generatedTitle;
+            } else {
+                const errorText = await titleResponse.text();
+                console.error('Error generating title:', errorText);
+            }
+        } catch (err) {
+            console.error('Title generation error:', err);
         }
     }
 
-    console.log("POST /chat => final chat after storing message:", JSON.stringify(chat, null, 2));
-
+    // Finally upsert chat
     await upsertChatHistory(chat);
+
     const category = categorizeChat(chat.timestamp);
 
-    res.json({
+    // Return the final result
+    return res.json({
         response: aiResponse,
         chatId,
         category,
-        tokens: total_tokens,
+        tokens: totalTokens,
         average_tokens_per_interaction: chat.average_tokens_per_interaction,
         total_image_count: chat.total_image_count,
         total_image_size: chat.total_image_size,
