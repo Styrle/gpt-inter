@@ -32,7 +32,7 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const retentionDays = Number(process.env.DELETE_CHAT_HISTORY) || 90;
 const NINETY_DAYS_IN_MS = retentionDays * 24 * 60 * 60 * 1000;
 
-const ENV_SYSTEM_PROMPT = process.env.SYSTEM_PROMPT;
+const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT;
 const currentDate = new Date().toLocaleDateString('en-GB'); 
 
 // ========================================
@@ -383,7 +383,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     const { message, tutorMode, chatId: providedChatId } = req.body;
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
-    // 1) Log the incoming request body
     console.log(`[POST /chat] Received body:`, JSON.stringify(req.body, null, 2));
     console.log(`[POST /chat] User ID:`, userId);
 
@@ -393,13 +392,12 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         chatId = `${userId}_chat_${randomNumber}`;
     }
 
-    // If no message and no images
     if (!message && (!req.files || req.files.length === 0)) {
         console.warn('[POST /chat] No message or files provided');
         return res.status(400).json({ error: 'Missing message or files' });
     }
 
-    // Fetch or create chat in DB
+    // Fetch or create a chat
     let chat = await getChatHistory(chatId);
     const isNewChat = !chat;
 
@@ -419,9 +417,9 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             total_document_size: 0,
         };
     }
-        // Ensure numeric fields
-        if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
-        if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
+            // Ensure numeric fields
+            if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+            if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
     // Prepare last 20 messages
     let messages = chat.messages.slice(-20).map(msg => ({
@@ -435,7 +433,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         role: 'system',
         content: tutorMode
             ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-            : ENV_SYSTEM_PROMPT.replace('{CURRENT_DATE}', currentDate),
+            : SYSTEM_PROMPT.replace('{CURRENT_DATE}', currentDate),
         timestamp: new Date().toISOString(),
     };
     messages.unshift(systemMessage);
@@ -446,7 +444,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         userContentArray.push({ type: 'text', text: message });
     }
 
-    // 2) If we have images, log them & update chat stats
+    // If we have images, log them & update stats
     if (req.files && req.files.length > 0) {
         console.log('[POST /chat] Number of image files:', req.files.length);
         for (const file of req.files) {
@@ -480,7 +478,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         });
     }
 
-    // Ephemeral text from session (uploaded docs)
+    // Ephemeral text from uploaded docs
     if (req.session.extractedTexts && req.session.extractedTexts.length > 0) {
         const relevantTexts = req.session.extractedTexts
             .filter(item => item.chatId === chatId)
@@ -496,17 +494,16 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         }
     }
 
-    // 3) Prepare the Azure OpenAI request payload
+    // Prepare the Azure OpenAI request payload
     const payload = {
         model: 'gpt-4o', // Check your actual model name
         messages: messages,
         temperature: 0.7,
-        max_tokens: 2048 // Increase if needed
+        max_tokens: 2048
     };
 
     console.log('[POST /chat] Payload to Azure:', JSON.stringify(payload, null, 2));
 
-    // Make request to Azure
     let aiResponse = '';
     let usage = {};
     let finishReason = '';
@@ -524,17 +521,67 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             }
         );
 
+        // Check if 2xx
         if (!response.ok) {
+            // Get the error body
             const errorText = await response.text();
             console.error('Error from OpenAI API:', errorText);
+
+            // Try to parse to see if it's a known content filter error
+            try {
+                const errorJson = JSON.parse(errorText);
+
+                const maybeCode = errorJson?.error?.code;
+                const maybeInnerCode = errorJson?.error?.innererror?.code;
+
+                // If this is a 'content_filter' or 'ResponsibleAIPolicyViolation'
+                // we treat it like the model refused due to policy
+                if (
+                    maybeCode === 'content_filter' ||
+                    maybeInnerCode === 'ResponsibleAIPolicyViolation'
+                ) {
+                    console.warn('[POST /chat] Azure content policy violation => returning graceful fallback.');
+
+                    // Provide a friendly AI fallback
+                    const fallbackMessage = "I'm sorry, but I can’t provide that, due to my content filter.";
+                    
+                    // Store assistant fallback in chat
+                    chat.messages.push({
+                        role: 'assistant',
+                        content: fallbackMessage,
+                        timestamp: new Date().toISOString(),
+                        tokens: 0,
+                    });
+                    chat.timestamp = new Date().toISOString();
+
+                    // Upsert chat so we have that fallback message
+                    await upsertChatHistory(chat);
+
+                    // Return success (200) with fallback
+                    return res.json({
+                        response: fallbackMessage,
+                        chatId,
+                        category: categorizeChat(chat.timestamp),
+                        tokens: 0,
+                        average_tokens_per_interaction: chat.average_tokens_per_interaction,
+                        total_image_count: chat.total_image_count,
+                        total_image_size: chat.total_image_size,
+                        total_document_count: chat.total_document_count,
+                        total_document_size: chat.total_document_size,
+                    });
+                }
+            } catch (parseErr) {
+                console.error('Failed to parse error JSON:', parseErr);
+            }
+
+            // Otherwise, it’s some other error
             return res.status(500).json({ error: `OpenAI request failed: ${response.statusText}` });
         }
 
-        // 5) Log raw data from Azure
+        // If we reach here, we have a 2xx response from Azure
         const data = await response.json();
         console.log('[POST /chat] Raw response from Azure:', JSON.stringify(data, null, 2));
 
-        // Extract the content
         aiResponse = data.choices?.[0]?.message?.content || '';
         usage = data.usage || {};
         finishReason = data.choices?.[0]?.finish_reason || '';
@@ -548,10 +595,10 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         return res.status(500).json({ error: 'OpenAI fetch threw an exception.' });
     }
 
-    // Check for empty or content-filtered response
+    // Also handle blank or "content_filter" finish_reason
     if (finishReason === 'content_filter' || !aiResponse) {
-        console.warn('[POST /chat] Content filter triggered or empty response. Returning graceful error.');
-        aiResponse = "I'm sorry, but I can’t provide that, it breaks my content filter";
+        console.warn('[POST /chat] Content filter triggered or empty text => returning fallback.');
+        aiResponse = "I'm sorry, but I can’t provide that, due to my content filter.";
     }
 
     // Store assistant response
@@ -566,22 +613,24 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     const totalTokens = usage.total_tokens || 0;
     chat.total_tokens_used += totalTokens;
     chat.total_interactions += 2; // user + assistant
-    chat.average_tokens_per_interaction = chat.total_tokens_used / chat.total_interactions;
+    chat.average_tokens_per_interaction =
+        chat.total_tokens_used / chat.total_interactions;
     chat.timestamp = new Date().toISOString();
 
-    // If it's a new chat, generate a title
+    // Title generation if new chat
     if (isNewChat) {
         try {
             const titlePrompt = [
                 {
                     role: 'system',
                     content:
-                        'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.'
+                        'You are an assistant that generates concise titles for conversations. The title should be 5 words or less and contain no quotes.',
                 },
                 {
                     role: 'user',
-                    content: message || 'The title should be 5 words or less and contain no quotes.'
-                }
+                    content:
+                        message || 'The title should be 5 words or less and contain no quotes.',
+                },
             ];
 
             const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
@@ -599,7 +648,8 @@ app.post('/chat', upload.array('image'), async (req, res) => {
 
             if (titleResponse.ok) {
                 const titleData = await titleResponse.json();
-                const generatedTitle = titleData.choices?.[0]?.message?.content?.trim() || 'No Title';
+                const generatedTitle =
+                    titleData.choices?.[0]?.message?.content?.trim() || 'No Title';
                 chat.title = generatedTitle;
             } else {
                 const errorText = await titleResponse.text();
@@ -610,12 +660,12 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         }
     }
 
-    // Finally upsert chat
+    // Upsert chat
     await upsertChatHistory(chat);
 
     const category = categorizeChat(chat.timestamp);
 
-    // Return the final result
+    // Return final
     return res.json({
         response: aiResponse,
         chatId,
@@ -628,6 +678,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         total_document_size: chat.total_document_size,
     });
 });
+
 
 app.get('/chats', async (req, res) => {
     try {
@@ -828,7 +879,7 @@ app.use((req, res, next) => {
 });
 
 console.log(`[CONFIG] Chat retention days: ${retentionDays}`);
-console.log(`[CONFIG] System prompt: ${ENV_SYSTEM_PROMPT}`);
+console.log(`[CONFIG] System prompt: ${SYSTEM_PROMPT}`);
 
 // ========================================
 // Start the Server
