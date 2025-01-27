@@ -41,7 +41,7 @@
     --border-radius: 8px;
     --input-padding: 10px;
     --icon-size: 36px;
-    --font-size-base: 0.85rem;
+    --font-size-base: 1rem;
     --transition-duration: 0.3s;
 
     /* Z-Indices */
@@ -133,6 +133,9 @@ body.no-chat-scroll .chat-window {
     position: relative;
     flex-direction: column;
     padding: 20px;
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
     overflow: hidden;
 }
 
@@ -172,7 +175,7 @@ body.no-chat-scroll .chat-window {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.875rem;
+    font-size: 0.8rem;
 }
 
 .chat-item:hover {
@@ -374,6 +377,7 @@ body.no-chat-scroll .chat-window {
 .chat-category-list {
     margin-top: 10px;
     margin-bottom: 5px;
+    font-size: 0.8rem;
 }
 
 ul.chat-category-list {
@@ -414,6 +418,10 @@ ul.chat-category-list {
     text-align: right;
     color: var(--color-light);
 }
+
+.message.user.user-loading .message-content {
+    background-color: transparent !important;
+  }
 
 .message.ai .message-content {
     background-color: none;
@@ -624,6 +632,11 @@ ul.chat-category-list {
     text-decoration: underline;
 }
 
+.file-name-disabled {
+    text-decoration: none;
+    color: var(--color-secondary)
+}
+
 .delete-button:hover {
     color: #ff4d4d;
 }
@@ -634,6 +647,11 @@ ul.chat-category-list {
 
 .file-icon {
     color: rgb(76, 175, 80);
+    text-decoration: none;
+}
+
+.grey-file-icon {
+    color: rgb(88, 88, 88);
     text-decoration: none;
 }
 

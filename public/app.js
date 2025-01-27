@@ -449,23 +449,39 @@ async function loadChat(chatIdToLoad) {
     chatId = chatIdToLoad;
     sessionStorage.setItem('chatId', chatId);
 
+    // Fetch the chat object
     const res = await fetch(`/chats/${chatId}`);
     const chat = await res.json();
 
+    // Clear the chat box
     chatBox.innerHTML = '';
 
-    // If the chat has no messages, show the welcome screen
-    if (chat.messages.length === 0) {
+    // If no messages, show welcome
+    if (!chat.messages || chat.messages.length === 0) {
         showWelcomeScreen();
+        return;
     } else {
         hideWelcomeScreen();
     }
 
-    // Append the messages to the chat window
+    // Suppose the server or session sets which files are still in memory:
+    const inSessionList = chat.stillInSessionFiles || [];
+
+    // Render each message
     chat.messages.forEach(msg => {
-        appendMessage(msg.role === 'user' ? 'You' : 'AI', msg.content, false);
+        if (msg.type === 'file-upload' && msg.fileName) {
+            // Show a “file card”
+            const fileName = msg.fileName;
+            const isAvailable = inSessionList.includes(fileName);
+            appendFileLink(fileName, '#', isAvailable);
+        } else {
+            // Normal text message
+            const senderName = (msg.role === 'user') ? 'You' : 'AI';
+            appendMessage(senderName, msg.content);
+        }
     });
 
+    // Focus the input at the end
     chatInput.focus();
 }
 
@@ -548,13 +564,26 @@ function debugSessionStorage(label = "") {
 function appendMessage(sender, message, imageFile = null, isLoading = false) {
     const chatBox = document.getElementById("chat-box");
     const messageElement = document.createElement("div");
-    messageElement.classList.add("message", sender === "You" ? "user" : "ai");
+    
+    // If it's from "You", add "user" class; if AI, add "ai"
+    if (sender === "You") {
+        messageElement.classList.add("message", "user");
+        // If we're loading on the user side, add an extra class
+        // so we can override the background color in CSS
+        if (isLoading) {
+            messageElement.classList.add("user-loading");
+        }
+    } else {
+        messageElement.classList.add("message", "ai");
+    }
 
     const messageContent = document.createElement("div");
     messageContent.classList.add("message-content");
 
+    // Regex to detect math segments
     const mathPattern = /(\$\$[\s\S]*?\$\$)|(\\\([\s\S]*?\\\))|(\$[\s\S]*?\$)|(\\\[[\s\S]*?\\\])/g;
 
+    // Helper to handle Markdown + MathJax placeholders
     function processTextWithMarkdownAndMath(text) {
         const mathSegments = [];
         let placeholderIndex = 0;
@@ -565,7 +594,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
             return `%%%MATH${placeholderIndex++}%%%`;
         });
 
-        // Convert markdown (excluding math) to HTML
+        // Convert Markdown (excluding math) to HTML
         const parsedHTML = marked.parse(textWithPlaceholders);
 
         // Restore math segments
@@ -578,6 +607,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     }
 
     if (sender === "AI") {
+        // ----- AI Message -----
         const aiIcon = document.createElement("img");
         aiIcon.src = "images/K_logo.svg";
         aiIcon.alt = "AI Icon";
@@ -586,19 +616,19 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
-        let entireMessage = '';
+        let entireMessage = "";
 
         // Split text into normal segments and code blocks
         const codeBlockRegex = /```(\w+)?([\s\S]*?)```/g;
-        const parts = message.split(codeBlockRegex);
+        const parts = message ? message.split(codeBlockRegex) : [""];
 
-        let language = '';
+        let language = "";
 
         parts.forEach((part, index) => {
-            const safePart = (part || '').trim();
+            const safePart = (part || "").trim();
 
-            // Every 3rd part is either text or code based on index
             if (index % 3 === 0) {
+                // Plain text segment
                 const messageText = document.createElement("div");
                 messageText.classList.add("message-text");
 
@@ -606,25 +636,26 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 messageText.innerHTML = finalHTML;
 
                 // Wrap tables, if any
-                const tables = messageText.querySelectorAll('table');
-                tables.forEach((table, tIndex) => {
-                    table.classList.add('table', 'table-bordered');
-                    
-                    const tableContainer = document.createElement('div');
-                    tableContainer.classList.add('table-responsive-container');
-                  
-                    const scrollableDiv = document.createElement('div');
-                    scrollableDiv.classList.add('table-responsive');
-                    scrollableDiv.setAttribute('tabindex', '0');
-                    scrollableDiv.setAttribute('role', 'region');
+                const tables = messageText.querySelectorAll("table");
+                tables.forEach((table) => {
+                    table.classList.add("table", "table-bordered");
 
-                    const accessibleMessage = document.createElement('span');
-                    accessibleMessage.classList.add('accessible-message', 'visually-hidden');
-                    accessibleMessage.textContent = 'Horizontal Scrolling Table - Use the arrow keys to scroll left and right';
+                    const tableContainer = document.createElement("div");
+                    tableContainer.classList.add("table-responsive-container");
 
-                    const swipeIcon = document.createElement('div');
-                    swipeIcon.classList.add('svg-icon', 'swipe-icon');
-                    swipeIcon.setAttribute('data-url', 'assets/img/base/icons/swipe_icon.svg');
+                    const scrollableDiv = document.createElement("div");
+                    scrollableDiv.classList.add("table-responsive");
+                    scrollableDiv.setAttribute("tabindex", "0");
+                    scrollableDiv.setAttribute("role", "region");
+
+                    const accessibleMessage = document.createElement("span");
+                    accessibleMessage.classList.add("accessible-message", "visually-hidden");
+                    accessibleMessage.textContent =
+                        "Horizontal Scrolling Table - Use the arrow keys to scroll left and right";
+
+                    const swipeIcon = document.createElement("div");
+                    swipeIcon.classList.add("svg-icon", "swipe-icon");
+                    swipeIcon.setAttribute("data-url", "assets/img/base/icons/swipe_icon.svg");
 
                     const oldParent = table.parentNode;
                     oldParent.insertBefore(tableContainer, table);
@@ -637,19 +668,17 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
                 messageBody.appendChild(messageText);
                 entireMessage += safePart;
-
             } else if (index % 3 === 1) {
-                // Language for the code block
+                // Code block language
                 language = safePart;
             } else if (index % 3 === 2) {
                 // Code block content
                 const codeBlock = document.createElement("div");
                 codeBlock.classList.add("code-block-container");
 
-                // ADDED: Code block header
                 const codeBlockHeader = document.createElement("div");
                 codeBlockHeader.classList.add("code-block-header");
-                codeBlockHeader.textContent = language ? language : "Code";
+                codeBlockHeader.textContent = language || "Code";
                 codeBlock.appendChild(codeBlockHeader);
 
                 const codeElement = document.createElement("pre");
@@ -662,8 +691,10 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeContent.textContent = safePart;
                 codeElement.appendChild(codeContent);
 
+                // HighlightJS
                 hljs.highlightElement(codeContent);
 
+                // Copy button inside code block
                 const codeCopyButton = document.createElement("span");
                 codeCopyButton.classList.add("material-symbols-rounded", "code-copy-button");
                 codeCopyButton.textContent = "content_copy";
@@ -680,18 +711,19 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
                 codeBlock.appendChild(codeElement);
                 codeBlock.appendChild(codeCopyButton);
                 messageBody.appendChild(codeBlock);
+
                 entireMessage += `\n\n${safePart}`;
             }
         });
 
         if (isLoading) {
-            // Show loading dots
+            // Show loading dots for AI
             const loadingDots = document.createElement("div");
             loadingDots.classList.add("loading-dots");
             loadingDots.innerHTML = `<div></div><div></div><div></div>`;
             messageBody.appendChild(loadingDots);
         } else {
-            // Entire message copy button
+            // Entire AI message copy button
             const copyButtonContainer = document.createElement("div");
             copyButtonContainer.classList.add("copy-button-container");
 
@@ -716,15 +748,24 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
         messageContent.appendChild(messageBody);
 
     } else if (sender === "You") {
-        // User message
+        // ----- User Message -----
         const messageBody = document.createElement("div");
         messageBody.classList.add("message-body");
 
-        if (message) {
-            const messageText = document.createElement("div");
-            messageText.classList.add("message-text");
-            messageText.textContent = message;
-            messageBody.appendChild(messageText);
+        if (isLoading) {
+            // Show loading dots for user
+            const loadingDots = document.createElement("div");
+            loadingDots.classList.add("loading-dots");
+            loadingDots.innerHTML = `<div></div><div></div><div></div>`;
+            messageBody.appendChild(loadingDots);
+        } else {
+            // If we have actual user text, display it
+            if (message) {
+                const messageText = document.createElement("div");
+                messageText.classList.add("message-text");
+                messageText.textContent = message;
+                messageBody.appendChild(messageText);
+            }
         }
 
         messageContent.appendChild(messageBody);
@@ -736,20 +777,20 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
     // Always scroll chat box to bottom
     chatBox.scrollTop = chatBox.scrollHeight;
 
-    // Also scroll entire page to bottom for new user messages
+    // Auto-scroll entire page if the sender is 'You'
     if (sender === "You") {
         window.scrollTo(0, document.body.scrollHeight);
     }
 
-    // Dynamically typeset MathJax for the newly added message element
+    // Dynamically typeset MathJax for newly added elements
     if (window.MathJax && MathJax.typesetPromise) {
-        MathJax.typesetPromise([messageElement])
-            .catch(err => console.error("MathJax rendering failed:", err));
+        MathJax.typesetPromise([messageElement]).catch((err) => {
+            console.error("MathJax rendering failed:", err);
+        });
     } else {
         console.error("MathJax is not loaded or does not support typesetPromise.");
     }
-    
-    console.log("appendMessage returning messageElement =", messageElement);
+
     return messageElement;
 }
 
@@ -765,182 +806,192 @@ let selectedImageFile = null;
 let fileUploadInProgress = false; 
 
 fileUpload.addEventListener('change', async function () {
-    if (fileUploadInProgress) return; 
+    if (fileUploadInProgress) return;
     fileUploadInProgress = true;
 
-    const files = fileUpload.files;
-    if (files.length > 0) {
-        for (const file of files) {
-            if (file.type.startsWith('image/')) {
-                // Check if the image type is supported
-                if (!isSupportedImageType(file)) {
-                    const fileExtension = getFileExtension(file.name);
-                    displayPopup(`Image type .${fileExtension} not supported`);
-                    continue;
-                }
+    // Show the loading message on the user side (right)
+    const loadingMessageElement = appendMessage('You', '', null, true);
 
-                // It's a supported image, add it to the selectedImageFiles array
-                selectedImageFiles.push(file);
-
-                // Generate a blob URL for the image
-                const imageUrl = URL.createObjectURL(file);
-
-                // Display the image link in the chat
-                appendFileLink(file.name, imageUrl);
-
-                // Change the attach icon to 'done'
-                attachIcon.textContent = "done";
-
-                // Revert back to attach icon after 2 seconds
-                setTimeout(() => {
-                    attachIcon.textContent = "attach_file";
-                }, 2000);
-
-                // Reset the file input
-                fileUpload.value = '';
-            } else {
-                // Not an image, upload it immediately via /upload endpoint
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('chatId', chatId);
-
-                try {
-                    const response = await fetch('/upload', {
-                        method: 'POST',
-                        body: formData,
-                    });
-
-                    if (response.ok) {
-                        // Change the attach icon to 'done'
-                        attachIcon.textContent = "done"; 
-                        
-                        // Revert back to attach icon after 2 seconds
-                        setTimeout(() => {
-                            attachIcon.textContent = "attach_file";
-                        }, 2000);
-
-                        // Inform the user that the file was uploaded
-                        appendMessage('System', `File "${file.name}" uploaded successfully.`);
-
-                        const responseData = await response.json();
-                        const fileUrl = responseData.url || '#'; 
-                        appendFileLink(file.name, fileUrl);
-                    } else {
-                        const errorData = await response.json();
-                        console.error('Upload error:', errorData.error);
-                        appendMessage('System', `Error uploading file: ${errorData.error}`);
-
-                        if (errorData.error.includes('Unsupported file type')) {
-                            const fileExtension = getFileExtension(file.name);
-                            displayPopup(`Document type .${fileExtension} not supported`);
-                        } else {
-                            displayPopup(`Error uploading file: ${errorData.error}`);
-                        }
+    try {
+        const files = fileUpload.files;
+        if (files.length > 0) {
+            for (const file of files) {
+                if (file.type.startsWith('image/')) {
+                    // Check if the image type is supported
+                    if (!isSupportedImageType(file)) {
+                        const fileExtension = getFileExtension(file.name);
+                        displayPopup(`Image type .${fileExtension} not supported`);
+                        continue;
                     }
-                } catch (error) {
-                    console.error('Error uploading file:', error);
-                    appendMessage('System', 'An error occurred while uploading the file.');
-                } finally {
+
+                    // It's a supported image, add it to the selectedImageFiles array
+                    selectedImageFiles.push(file);
+
+                    // Generate a blob URL for the image
+                    const imageUrl = URL.createObjectURL(file);
+
+                    // Display the image link in the chat
+                    appendFileLink(file.name, imageUrl);
+
+                    // Change the attach icon to 'done'
+                    attachIcon.textContent = "done";
+
+                    // Revert back to attach icon after 2 seconds
                     setTimeout(() => {
-                        fileUpload.value = '';  
-                    }, 100);  
+                        attachIcon.textContent = "attach_file";
+                    }, 2000);
+
+                    // Reset the file input
+                    fileUpload.value = '';
+                } else {
+                    // Not an image, upload it immediately
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('chatId', chatId);
+
+                    try {
+                        const response = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData,
+                        });
+
+                        if (response.ok) {
+                            // Change the attach icon to 'done'
+                            attachIcon.textContent = "done"; 
+                            
+                            // Revert back to attach icon after 2 seconds
+                            setTimeout(() => {
+                                attachIcon.textContent = "attach_file";
+                            }, 2000);
+
+                            // Inform the user that the file was uploaded
+                            appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                            const responseData = await response.json();
+                            const fileUrl = responseData.url || '#'; 
+                            appendFileLink(file.name, fileUrl);
+                        } else {
+                            const errorData = await response.json();
+                            console.error('Upload error:', errorData.error);
+                            appendMessage('System', `Error uploading file: ${errorData.error}`);
+
+                            if (errorData.error.includes('Unsupported file type')) {
+                                const fileExtension = getFileExtension(file.name);
+                                displayPopup(`Document type .${fileExtension} not supported`);
+                            } else {
+                                displayPopup(`Error uploading file: ${errorData.error}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error uploading file:', error);
+                        appendMessage('System', 'An error occurred while uploading the file.');
+                    } finally {
+                        setTimeout(() => {
+                            fileUpload.value = '';  
+                        }, 100);  
+                    }
                 }
             }
         }
+    } catch (error) {
+        console.error('Error handling file upload:', error);
+    } finally {
+        // Remove the loading dots once all uploads are done
+        if (loadingMessageElement && loadingMessageElement.parentNode) {
+            loadingMessageElement.parentNode.removeChild(loadingMessageElement);
+        }
+        fileUploadInProgress = false;
     }
-    fileUploadInProgress = false;  
 });
 
-function appendFileLink(fileName, fileUrl) {
+function appendFileLink(fileName, fileUrl, isDocumentAvailable = true) {
     const chatBox = document.getElementById('chat-box');
-    
+
     // Create a container for the file link
     const fileElement = document.createElement('div');
     fileElement.classList.add('file-upload-container', 'user');
-    
+
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
 
-    // Determine if the file is an image based on its extension
-    const isImage = /\.(jpeg|jpg|gif|png|bmp|svg|tif|heic)$/i.test(fileName);
-
-    // Create a link to hold both the icon and file name
+    // Decide icon
     const fileIconLink = document.createElement('a');
-    fileIconLink.href = fileUrl || '#'; 
     fileIconLink.classList.add('file-link');
 
-    // Decide which Material Icon to display
     const fileIcon = document.createElement('span');
     fileIcon.classList.add('material-symbols-rounded', 'file-icon');
-    fileIcon.textContent = isImage ? 'photo' : 'insert_drive_file';
 
-    // If it's an image, show in a modal on click
-    if (isImage && fileUrl) {
-        fileIconLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            showImageModal(fileUrl);
-        });
-        fileIconLink.style.cursor = 'pointer';
-    } 
-    // Otherwise, open in a new tab
-    else if (fileUrl) {
-        fileIconLink.target = '_blank';
-    }
-
-    // Add the icon
-    fileIconLink.appendChild(fileIcon);
-
-    // Add the file name (shown between the icon and delete icon)
     const fileNameSpan = document.createElement('span');
     fileNameSpan.classList.add('file-name');
-    fileNameSpan.textContent = fileName;
-    fileIconLink.appendChild(fileNameSpan);
 
-    // Append the clickable link (icon + name) to the message
-    messageContent.appendChild(fileIconLink);
-    
-    // Create the delete (bin) button
-    const deleteButton = document.createElement('span');
-    deleteButton.classList.add('material-symbols-rounded', 'delete-button');
-    deleteButton.textContent = 'delete';
-    deleteButton.title = 'Delete this file message';
+    if (!isDocumentAvailable) {
+        // --- UNAVAILABLE DOC ---
+        fileIcon.textContent = 'insert_drive_file';
+        fileIcon.classList.add('grey-file-icon');
+        fileNameSpan.textContent = 'document is no longer available';
+        fileNameSpan.classList.add('file-name-disabled');
 
-    // Clicking the bin calls our DELETE route, then removes from DOM on success
-    deleteButton.addEventListener('click', async () => {
-        try {
-            console.log(`[appendFileLink] Attempting to delete file "${fileName}" from chatId=${chatId}`);
+        fileIconLink.href = '#';
+        fileIconLink.style.cursor = 'default';
 
-            // Encode filename for URL safety
-            const encodedFileName = encodeURIComponent(fileName);
+        // Add icon + text to the link
+        fileIconLink.appendChild(fileIcon);
+        fileIconLink.appendChild(fileNameSpan);
 
-            const resp = await fetch(`/chats/${chatId}/files/${encodedFileName}`, {
-                method: 'DELETE',
-            });
+        // Put the link into the container
+        messageContent.appendChild(fileIconLink);
 
-            if (!resp.ok) {
-                const err = await resp.json();
-                console.error('[appendFileLink] DELETE file failed =>', err.error || resp.statusText);
-                displayPopup(`Error removing file from chat: ${err.error || resp.statusText}`);
-            } else {
-                console.log(`[appendFileLink] File "${fileName}" deleted successfully. Removing from DOM...`);
-                chatBox.removeChild(fileElement);
-            }
-        } catch (err) {
-            console.error('[appendFileLink] Error calling DELETE for file:', err);
-            displayPopup(`Error deleting file: ${err}`);
+    } else {
+        // --- AVAILABLE DOC ---
+        fileIcon.textContent = 'insert_drive_file';
+        fileIcon.classList.remove('grey-file-icon');
+        fileNameSpan.textContent = fileName;
+        fileNameSpan.classList.remove('file-name-disabled');
+
+        if (fileUrl && fileUrl !== '#') {
+            fileIconLink.href = fileUrl;
+            fileIconLink.target = '_blank';
         }
-    });
 
-    // Add delete button to the message
-    messageContent.appendChild(deleteButton);
+        // Build the file link first
+        fileIconLink.appendChild(fileIcon);
+        fileIconLink.appendChild(fileNameSpan);
+        messageContent.appendChild(fileIconLink);
 
-    // Combine all into the final element in the chat
+        // Create the delete (bin) button, appended AFTER the link
+        const deleteButton = document.createElement('span');
+        deleteButton.classList.add('material-symbols-rounded', 'delete-button');
+        deleteButton.textContent = 'delete';
+
+        deleteButton.addEventListener('click', async () => {
+            try {
+                const encodedFileName = encodeURIComponent(fileName);
+                const resp = await fetch(`/chats/${chatId}/files/${encodedFileName}`, {
+                    method: 'DELETE',
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    displayPopup(`Error removing file: ${err.error || resp.statusText}`);
+                } else {
+                    // Remove from DOM
+                    chatBox.removeChild(fileElement);
+                }
+            } catch (err) {
+                displayPopup(`Error deleting file: ${err}`);
+            }
+        });
+
+        messageContent.appendChild(deleteButton);
+    }
+
     fileElement.appendChild(messageContent);
     chatBox.appendChild(fileElement);
 
     // Scroll to the bottom to reveal the newly added file
     chatBox.scrollTop = chatBox.scrollHeight;
 }
+
 
 const sidebar = document.getElementById('sidebar');
 
@@ -1604,67 +1655,79 @@ async function handleDrop(e) {
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-        if (fileUploadInProgress) return; 
+        if (fileUploadInProgress) return;
         fileUploadInProgress = true;
 
-        for (const file of files) {
-            if (file.type.startsWith('image/')) {
-                // Check if the image type is supported
-                if (!isSupportedImageType(file)) {
-                    const fileExtension = getFileExtension(file.name);
-                    displayPopup(`Image type .${fileExtension} not supported`);
-                    continue;
-                }
-                selectedImageFiles.push(file);
+        // Show the loading message on the user side (right)
+        const loadingMessageElement = appendMessage('You', '', null, true);
 
-                const imageUrl = URL.createObjectURL(file);
-                appendFileLink(file.name, imageUrl);
-
-                attachIcon.textContent = "done";
-                setTimeout(() => {
-                    attachIcon.textContent = "attach_file";
-                }, 2000);
-            } else {
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('chatId', chatId);
-
-                try {
-                    const response = await fetch('/upload', {
-                        method: 'POST',
-                        body: formData,
-                    });
-
-                    if (response.ok) {
-                        attachIcon.textContent = "done"; 
-                        setTimeout(() => {
-                            attachIcon.textContent = "attach_file";
-                        }, 2000);
-
-                        appendMessage('System', `File "${file.name}" uploaded successfully.`);
-
-                        const responseData = await response.json();
-                        const fileUrl = responseData.url || '#';
-                        appendFileLink(file.name, fileUrl);
-                    } else {
-                        const errorData = await response.json();
-                        console.error('Upload error:', errorData.error);
-                        appendMessage('System', `Error uploading file: ${errorData.error}`);
-
-                        if (errorData.error.includes('Unsupported file type')) {
-                            const fileExtension = getFileExtension(file.name);
-                            displayPopup(`Document type .${fileExtension} not supported`);
-                        } else {
-                            displayPopup(`Error uploading file: ${errorData.error}`);
-                        }
+        try {
+            for (const file of files) {
+                if (file.type.startsWith('image/')) {
+                    // Check if the image type is supported
+                    if (!isSupportedImageType(file)) {
+                        const fileExtension = getFileExtension(file.name);
+                        displayPopup(`Image type .${fileExtension} not supported`);
+                        continue;
                     }
-                } catch (error) {
-                    console.error('Error uploading file:', error);
-                    appendMessage('System', 'An error occurred while uploading the file.');
+                    selectedImageFiles.push(file);
+
+                    const imageUrl = URL.createObjectURL(file);
+                    appendFileLink(file.name, imageUrl);
+
+                    attachIcon.textContent = "done";
+                    setTimeout(() => {
+                        attachIcon.textContent = "attach_file";
+                    }, 2000);
+                } else {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('chatId', chatId);
+
+                    try {
+                        const response = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData,
+                        });
+
+                        if (response.ok) {
+                            attachIcon.textContent = "done"; 
+                            setTimeout(() => {
+                                attachIcon.textContent = "attach_file";
+                            }, 2000);
+
+                            appendMessage('System', `File "${file.name}" uploaded successfully.`);
+
+                            const responseData = await response.json();
+                            const fileUrl = responseData.url || '#';
+                            appendFileLink(file.name, fileUrl);
+                        } else {
+                            const errorData = await response.json();
+                            console.error('Upload error:', errorData.error);
+                            appendMessage('System', `Error uploading file: ${errorData.error}`);
+
+                            if (errorData.error.includes('Unsupported file type')) {
+                                const fileExtension = getFileExtension(file.name);
+                                displayPopup(`Document type .${fileExtension} not supported`);
+                            } else {
+                                displayPopup(`Error uploading file: ${errorData.error}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error uploading file:', error);
+                        appendMessage('System', 'An error occurred while uploading the file.');
+                    }
                 }
             }
+        } catch (error) {
+            console.error('Error handling drop:', error);
+        } finally {
+            // Remove the loading dots once all uploads are done
+            if (loadingMessageElement && loadingMessageElement.parentNode) {
+                loadingMessageElement.parentNode.removeChild(loadingMessageElement);
+            }
+            fileUploadInProgress = false;
         }
-        fileUploadInProgress = false;  
     }
 }
 
