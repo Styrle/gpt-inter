@@ -907,14 +907,14 @@ fileUpload.addEventListener('change', async function () {
 function appendFileLink(fileName, fileUrl, isDocumentAvailable = true) {
     const chatBox = document.getElementById('chat-box');
 
-    // Create container
+    // Create a container for the file link
     const fileElement = document.createElement('div');
     fileElement.classList.add('file-upload-container', 'user');
 
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
 
-    // The clickable area
+    // Decide icon
     const fileIconLink = document.createElement('a');
     fileIconLink.classList.add('file-link');
 
@@ -925,29 +925,40 @@ function appendFileLink(fileName, fileUrl, isDocumentAvailable = true) {
     fileNameSpan.classList.add('file-name');
 
     if (!isDocumentAvailable) {
-        // Grey icon + “document is no longer available”
+        // --- UNAVAILABLE DOC ---
         fileIcon.textContent = 'insert_drive_file';
         fileIcon.classList.add('grey-file-icon');
         fileNameSpan.textContent = 'document is no longer available';
         fileNameSpan.classList.add('file-name-disabled');
 
-        // Don’t link anywhere
         fileIconLink.href = '#';
         fileIconLink.style.cursor = 'default';
+
+        // Add icon + text to the link
+        fileIconLink.appendChild(fileIcon);
+        fileIconLink.appendChild(fileNameSpan);
+
+        // Put the link into the container
+        messageContent.appendChild(fileIconLink);
+
     } else {
-        // Normal “available” file
+        // --- AVAILABLE DOC ---
         fileIcon.textContent = 'insert_drive_file';
         fileIcon.classList.remove('grey-file-icon');
         fileNameSpan.textContent = fileName;
         fileNameSpan.classList.remove('file-name-disabled');
 
-        // Link if you have a real URL
         if (fileUrl && fileUrl !== '#') {
             fileIconLink.href = fileUrl;
             fileIconLink.target = '_blank';
         }
 
-        // Delete button
+        // Build the file link first
+        fileIconLink.appendChild(fileIcon);
+        fileIconLink.appendChild(fileNameSpan);
+        messageContent.appendChild(fileIconLink);
+
+        // Create the delete (bin) button, appended AFTER the link
         const deleteButton = document.createElement('span');
         deleteButton.classList.add('material-symbols-rounded', 'delete-button');
         deleteButton.textContent = 'delete';
@@ -970,16 +981,14 @@ function appendFileLink(fileName, fileUrl, isDocumentAvailable = true) {
                 displayPopup(`Error deleting file: ${err}`);
             }
         });
+
         messageContent.appendChild(deleteButton);
     }
-
-    fileIconLink.appendChild(fileIcon);
-    fileIconLink.appendChild(fileNameSpan);
-    messageContent.appendChild(fileIconLink);
 
     fileElement.appendChild(messageContent);
     chatBox.appendChild(fileElement);
 
+    // Scroll to the bottom to reveal the newly added file
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 

@@ -282,43 +282,81 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             const { data: { text } } = await tesseract.recognize(file.buffer);
             extractedText = text;
         } else {
-            // Otherwise, parse the file as PDF, Word, etc.
             const extension = path.extname(file.originalname).toLowerCase();
             const mimetype = mime.lookup(extension) || file.mimetype;
 
             switch (true) {
+                // ======== PDF ========
                 case mimetype === 'application/pdf' || extension === '.pdf':
-                    const pdfData = await pdfParse(file.buffer);
-                    extractedText = pdfData.text;
+                    {
+                        const pdfData = await pdfParse(file.buffer);
+                        extractedText = pdfData.text;
+                    }
                     break;
-                case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx':
-                    const { value } = await mammoth.extractRawText({ buffer: file.buffer });
-                    extractedText = value;
+
+                // ======== Word .docx ========
+                case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                     || extension === '.docx':
+                    {
+                        const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+                        extractedText = value;
+                    }
                     break;
-                case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx':
-                    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
-                    workbook.SheetNames.forEach(sheetName => {
-                        const sheet = workbook.Sheets[sheetName];
-                        extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
-                    });
+
+                // ======== Excel .xlsx ========
+                case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                     || extension === '.xlsx':
+                    {
+                        const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+                        workbook.SheetNames.forEach(sheetName => {
+                            const sheet = workbook.Sheets[sheetName];
+                            extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
+                        });
+                    }
                     break;
+
+                // ======== Plain Text ========
                 case mimetype === 'text/plain' || extension === '.txt':
                     extractedText = file.buffer.toString('utf-8');
                     break;
+
+                // ======== Markdown ========
                 case mimetype === 'text/markdown' || extension === '.md':
                     extractedText = removeMarkdown(file.buffer.toString('utf-8'));
                     break;
+
+                // ======== HTML ========
                 case mimetype === 'text/html' || extension === '.html' || extension === '.htm':
                     extractedText = htmlToText(file.buffer.toString('utf-8'), { wordwrap: 130 });
                     break;
-                case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx':
-                    extractedText = await new Promise((resolve, reject) => {
-                        textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
-                            if (err) reject(err);
-                            else resolve(text);
+
+                // ======== PowerPoint .pptx ========
+                case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+                     || extension === '.pptx':
+                    {
+                        extractedText = await new Promise((resolve, reject) => {
+                            textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
+                                if (err) reject(err);
+                                else resolve(text);
+                            });
                         });
-                    });
+                    }
                     break;
+
+                // ======== CSV, JSON, Code Files (NEW) ========
+                case extension === '.csv':
+                case extension === '.json':
+                case extension === '.js':
+                case extension === '.py':
+                case extension === '.css':
+                case extension === '.java':
+                case extension === '.cpp':
+                case extension === '.cs':
+                case extension === '.ts':
+                    // For these, just read as text
+                    extractedText = file.buffer.toString('utf-8');
+                    break;
+
                 default:
                     return res.status(400).json({ error: 'Unsupported file type.' });
             }
@@ -355,11 +393,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         chat.total_document_count += 1;
         chat.total_document_size += file.size || 0;
 
-        // 7) Store a special “file-upload” message (no "Uploaded a document" text)
+        // 7) Store a special "file-upload" message
         chat.messages.push({
             role: 'user',
-            type: 'file-upload',            // <== crucial
-            fileName: file.originalname,    // <== store name
+            type: 'file-upload',
+            fileName: file.originalname,
             documentSize: file.size || 0,
             timestamp: new Date().toISOString()
         });
