@@ -257,13 +257,13 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
     if (!chatId) return res.status(400).json({ error: 'Missing chatId' });
 
-    // Ensure that the chatId belongs to the current user
+    // Ensure the chatId belongs to the current user
     if (!chatId.startsWith(`${userId}_chat_`)) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
 
     try {
-        // 1) Keep the file in-session only (no Cosmos)
+        // 1) Keep file in-session only (no Cosmos)
         if (!req.session.tempFiles) {
             req.session.tempFiles = [];
         }
@@ -275,11 +275,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             uploadedAt: new Date()
         });
 
-        // 2) Extract text but do NOT store in Cosmos
+        // 2) Extract text, but do NOT store in Cosmos
         let extractedText = '';
-
-        // Handle images with OCR (tesseract.js)
         if (file.mimetype.startsWith('image/')) {
+            // OCR for images
             const { data: { text } } = await tesseract.recognize(file.buffer);
             extractedText = text;
         } else {
@@ -287,44 +286,83 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             const mimetype = mime.lookup(extension) || file.mimetype;
 
             switch (true) {
+                // ======== PDF ========
                 case mimetype === 'application/pdf' || extension === '.pdf':
-                    const pdfData = await pdfParse(file.buffer);
-                    extractedText = pdfData.text;
+                    {
+                        const pdfData = await pdfParse(file.buffer);
+                        extractedText = pdfData.text;
+                    }
                     break;
-                case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx':
-                    const { value } = await mammoth.extractRawText({ buffer: file.buffer });
-                    extractedText = value;
+
+                // ======== Word .docx ========
+                case mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                     || extension === '.docx':
+                    {
+                        const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+                        extractedText = value;
+                    }
                     break;
-                case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || extension === '.xlsx':
-                    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
-                    workbook.SheetNames.forEach(sheetName => {
-                        const sheet = workbook.Sheets[sheetName];
-                        extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
-                    });
+
+                // ======== Excel .xlsx ========
+                case mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                     || extension === '.xlsx':
+                    {
+                        const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+                        workbook.SheetNames.forEach(sheetName => {
+                            const sheet = workbook.Sheets[sheetName];
+                            extractedText += xlsx.utils.sheet_to_csv(sheet) + '\n';
+                        });
+                    }
                     break;
+
+                // ======== Plain Text ========
                 case mimetype === 'text/plain' || extension === '.txt':
                     extractedText = file.buffer.toString('utf-8');
                     break;
+
+                // ======== Markdown ========
                 case mimetype === 'text/markdown' || extension === '.md':
                     extractedText = removeMarkdown(file.buffer.toString('utf-8'));
                     break;
+
+                // ======== HTML ========
                 case mimetype === 'text/html' || extension === '.html' || extension === '.htm':
                     extractedText = htmlToText(file.buffer.toString('utf-8'), { wordwrap: 130 });
                     break;
-                case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || extension === '.pptx':
-                    extractedText = await new Promise((resolve, reject) => {
-                        textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
-                            if (err) reject(err);
-                            else resolve(text);
+
+                // ======== PowerPoint .pptx ========
+                case mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+                     || extension === '.pptx':
+                    {
+                        extractedText = await new Promise((resolve, reject) => {
+                            textract.fromBufferWithMime(file.mimetype, file.buffer, (err, text) => {
+                                if (err) reject(err);
+                                else resolve(text);
+                            });
                         });
-                    });
+                    }
                     break;
+
+                // ======== CSV, JSON, Code Files (NEW) ========
+                case extension === '.csv':
+                case extension === '.json':
+                case extension === '.js':
+                case extension === '.py':
+                case extension === '.css':
+                case extension === '.java':
+                case extension === '.cpp':
+                case extension === '.cs':
+                case extension === '.ts':
+                    // For these, just read as text
+                    extractedText = file.buffer.toString('utf-8');
+                    break;
+
                 default:
                     return res.status(400).json({ error: 'Unsupported file type.' });
             }
         }
 
-        // 3) Keep extracted text in session memory for the chat, not in Cosmos
+        // 3) Keep extracted text in session memory for the chat (not in Cosmos)
         if (!req.session.extractedTexts) {
             req.session.extractedTexts = [];
         }
@@ -334,7 +372,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             text: extractedText
         });
 
-        // 4) Load chat from Cosmos (just for stats & references)
+        // 4) Load or create chat in Cosmos (just for doc stats & references)
         let chat = await getChatHistory(chatId);
         if (!chat) {
             chat = {
@@ -344,39 +382,36 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 timestamp: new Date().toISOString(),
                 total_document_count: 0,
                 total_document_size: 0
-                // We do NOT store the actual document content
             };
         }
 
-        // 5) Ensure fields for doc stats
+        // 5) Ensure doc counters
         if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
         if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
-        // 6) Update doc stats in Cosmos
+        // 6) Update stats
         chat.total_document_count += 1;
         chat.total_document_size += file.size || 0;
 
-        // 7) Add a message referencing the file
+        // 7) Store a special "file-upload" message
         chat.messages.push({
             role: 'user',
-            content: `Uploaded a document: ${file.originalname}`,
-            timestamp: new Date().toISOString(),
+            type: 'file-upload',
+            fileName: file.originalname,
             documentSize: file.size || 0,
+            timestamp: new Date().toISOString()
         });
 
-        // 8) DO NOT store the extracted text in Cosmos (skip chat.documentContent).
-        //    We only store doc stats & the reference message.
-
-        // 9) Upsert chat in Cosmos
+        // 8) Upsert chat (but do NOT store extracted text)
         await upsertChatHistory(chat);
 
-        // Done
-        res.status(200).json({ success: true });
+        return res.status(200).json({ success: true });
     } catch (error) {
         console.error('Error processing file:', error);
-        res.status(500).json({ error: 'Failed to process the uploaded file.' });
+        return res.status(500).json({ error: 'Failed to process the uploaded file.' });
     }
 });
+
 
 
 app.post('/chat', upload.array('image'), async (req, res) => {
@@ -417,9 +452,10 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             total_document_size: 0,
         };
     }
-            // Ensure numeric fields
-            if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
-            if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
+
+    // Ensure numeric fields
+    if (typeof chat.total_document_count !== 'number') chat.total_document_count = 0;
+    if (typeof chat.total_document_size !== 'number') chat.total_document_size = 0;
 
     // Prepare last 20 messages
     let messages = chat.messages.slice(-20).map(msg => ({
@@ -462,7 +498,15 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         }
     }
 
-    // Create user message
+    // Create a user message object so we can retroactively assign tokens
+    const userMessageObject = {
+        role: 'user',
+        content: message || 'Sent images',
+        timestamp: new Date().toISOString(),
+        tokens: 0, // Will be updated after we get usage.prompt_tokens
+    };
+
+    // Push user content to the 'messages' array for the model
     if (userContentArray.length > 0) {
         messages.push({
             role: 'user',
@@ -470,12 +514,8 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             timestamp: new Date().toISOString(),
         });
 
-        chat.messages.push({
-            role: 'user',
-            content: message || 'Sent images',
-            timestamp: new Date().toISOString(),
-            tokens: 0,
-        });
+        // Also store in our local chat record
+        chat.messages.push(userMessageObject);
     }
 
     // Ephemeral text from uploaded docs
@@ -530,12 +570,10 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             // Try to parse to see if it's a known content filter error
             try {
                 const errorJson = JSON.parse(errorText);
-
                 const maybeCode = errorJson?.error?.code;
                 const maybeInnerCode = errorJson?.error?.innererror?.code;
 
-                // If this is a 'content_filter' or 'ResponsibleAIPolicyViolation'
-                // we treat it like the model refused due to policy
+                // If this is a content filter type of error
                 if (
                     maybeCode === 'content_filter' ||
                     maybeInnerCode === 'ResponsibleAIPolicyViolation'
@@ -544,7 +582,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
 
                     // Provide a friendly AI fallback
                     const fallbackMessage = "I'm sorry, but I can’t provide that, due to my content filter.";
-                    
+
                     // Store assistant fallback in chat
                     chat.messages.push({
                         role: 'assistant',
@@ -595,13 +633,16 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         return res.status(500).json({ error: 'OpenAI fetch threw an exception.' });
     }
 
-    // Also handle blank or "content_filter" finish_reason
+    // Handle blank or "content_filter" finish_reason
     if (finishReason === 'content_filter' || !aiResponse) {
         console.warn('[POST /chat] Content filter triggered or empty text => returning fallback.');
         aiResponse = "I'm sorry, but I can’t provide that, due to my content filter.";
     }
 
-    // Store assistant response
+    // Assign the prompt_tokens to the user message we stored earlier
+    userMessageObject.tokens = usage.prompt_tokens || 0;
+
+    // Store assistant response (with completion_tokens)
     chat.messages.push({
         role: 'assistant',
         content: aiResponse,
@@ -612,7 +653,8 @@ app.post('/chat', upload.array('image'), async (req, res) => {
     // Update chat stats
     const totalTokens = usage.total_tokens || 0;
     chat.total_tokens_used += totalTokens;
-    chat.total_interactions += 2; // user + assistant
+    // We add 2 to interactions because user + assistant in each round
+    chat.total_interactions += 2;
     chat.average_tokens_per_interaction =
         chat.total_tokens_used / chat.total_interactions;
     chat.timestamp = new Date().toISOString();
@@ -715,15 +757,14 @@ app.delete('/chats/:chatId/files/:fileName', async (req, res) => {
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
     console.log(`[DELETE /chats/${chatId}/files/${fileName}] User=${userId}`);
 
-    // Check ownership
-
+    // Make sure user owns this chat
     if (!chatId.startsWith(`${userId}_chat_`)) {
         console.warn(`[DELETE /chats/${chatId}/files] Unauthorized attempt by user=${userId}`);
         return res.status(403).json({ error: 'Unauthorized' });
     }
 
     try {
-        // 1) Remove ephemeral text from req.session.extractedTexts (if present)
+        // 1) Remove ephemeral text from session
         if (req.session.extractedTexts) {
             const oldLen = req.session.extractedTexts.length;
             req.session.extractedTexts = req.session.extractedTexts.filter(
@@ -747,10 +788,10 @@ app.delete('/chats/:chatId/files/:fileName', async (req, res) => {
         let removedDocumentCount = 0;
         let removedDocumentSize = 0;
 
-        // Filter out messages referencing "Uploaded a document: <fileName>"
+        // Remove messages where (type === 'file-upload' && fileName matches)
         const originalCount = chat.messages.length;
-        chat.messages = chat.messages.filter((msg) => {
-            const isDocMessage = msg.content === `Uploaded a document: ${fileName}`;
+        chat.messages = chat.messages.filter(msg => {
+            const isDocMessage = (msg.type === 'file-upload' && msg.fileName === fileName);
             if (isDocMessage) {
                 removedDocumentCount += 1;
                 removedDocumentSize += (msg.documentSize || 0);
@@ -758,7 +799,6 @@ app.delete('/chats/:chatId/files/:fileName', async (req, res) => {
             return !isDocMessage;
         });
 
-        // If nothing changed:
         if (chat.messages.length === originalCount) {
             console.log(`[DELETE /chats/${chatId}/files] No matching message for file="${fileName}"`);
             return res.status(404).json({ error: 'No matching file reference in chat messages' });
@@ -783,7 +823,7 @@ app.delete('/chats/:chatId/files/:fileName', async (req, res) => {
         // Upsert updated chat
         await upsertChatHistory(chat);
 
-        console.log(`[DELETE /chats/${chatId}/files] Deleted file="${fileName}" references. Updated chat in DB.`);
+        console.log(`[DELETE /chats/${chatId}/files] Deleted file="${fileName}". Updated chat in DB.`);
         return res.json({ success: true });
     } catch (err) {
         console.error(`[DELETE /chats/${chatId}/files] Error:`, err);
