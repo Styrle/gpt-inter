@@ -1,0 +1,51 @@
+# Node.js
+
+# Build a general Node.js project with npm.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+- main
+- azure-pipelines-changes
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '20.5.0'
+  displayName: 'Install Node.js'
+
+- script: |
+    npm init -y
+    npm install
+    npm run build
+    npm run
+  displayName: 'npm install and build'
+
+- task: ArchiveFiles@2
+  displayName: 'Archive files'
+  inputs:
+    rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+    includeRootFolder: false
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish artifacts: kaplangpt'
+  
+- task: SonarCloudPrepare@3
+  inputs:
+    SonarQube: 'Sonarcloud Connection - AzureDevops'
+    organization: 'kaplan-uk'
+    scannerMode: 'cli'
+    configMode: 'manual'
+    cliProjectKey: 'Kaplan-UK_KaplanGPT'
+    cliProjectName: 'KaplanGPT'
+    cliSources: '.'
+- task: SonarCloudAnalyze@3
+  inputs:
+    jdkversion: 'JAVA_HOME_17_X64'
+
+- task: SonarCloudPublish@3
+  inputs:
+    pollingTimeoutSec: '300'

@@ -90,7 +90,7 @@ ul {
 
 .container {
     display: flex;
-    height: 100vh;
+    min-height: 100vh;
 }
 
 body.no-chat-scroll {
@@ -125,6 +125,7 @@ body.no-chat-scroll #chat-box {
 
 body.no-chat-scroll .chat-window {
     overflow: visible;
+    
 }
 
 .chat-window {
@@ -134,9 +135,12 @@ body.no-chat-scroll .chat-window {
     flex-direction: column;
     padding: 20px;
     max-width: 1200px;
-    margin-left: auto;
+    margin-left: var(--sidebar-width);   /* pushes the content over */
+    transition: margin var(--transition-duration) ease;
     margin-right: auto;
-    overflow: hidden;
+
+    /* page handles scrolling now */
+    overflow: visible;          /* was: hidden */
 }
 
 .chat-window.collapsed {
@@ -147,8 +151,11 @@ body.no-chat-scroll .chat-window {
 
 #chat-box {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
+
+    /* let the box expand, but never show a side-ways scrollbar */
+    overflow-x: hidden;      /* keep */
+    overflow-y: unset;       /* NEW: removes the inner scrollbar */
+
     margin-bottom: 10px;
     padding-right: 10px;
 }
@@ -175,7 +182,7 @@ body.no-chat-scroll .chat-window {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.8rem;
+    font-size: 0.875rem;
 }
 
 .chat-item:hover {
@@ -282,21 +289,31 @@ body.no-chat-scroll .chat-window {
    SIDEBAR
 ======================================= */
 
-.sidebar {
+.sidebar{
+    /* NEW – anchor the bar to the viewport itself                 */
+    position: fixed;          /* was: (none)                      */
+    top: 0;                   /* flush with the top edge          */
+    left: 0;
+
+    /* keep everything you already liked                           */
+    height: 100vh;            /* fill the whole height            */
     width: var(--sidebar-width);
     background-color: var(--color-sidebar-bg);
     transition: width var(--transition-duration) ease;
-    position: relative;
+    display: flex;
+    flex-direction: column;
     z-index: var(--z-sidebar);
-    padding-top: 50px;
+
+    /* leave room for the fixed icon bar that sits ON the sidebar  */
+    padding-top: calc(var(--icon-size) + 24px);
     overflow-y: auto;
 }
 
-.sidebar.collapsed {
+/* OPTIONAL (purely visual) — make the sidebar slide out of view on collapse */
+.sidebar.collapsed{
     width: 0;
     overflow: hidden;
 }
-
 /* =======================================
    ICON CONTAINER & ICONS
 ======================================= */
@@ -377,7 +394,7 @@ body.no-chat-scroll .chat-window {
 .chat-category-list {
     margin-top: 10px;
     margin-bottom: 5px;
-    font-size: 0.8rem;
+    font-size: 0.875rem;
 }
 
 ul.chat-category-list {

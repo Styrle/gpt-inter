@@ -148,21 +148,17 @@ function getFileExtension(fileName) {
 // Send message function - ensure tutorMode is passed
 async function sendMessage(message) {
     try {
-        const response = await fetch('/chat', {
+        const response = await fetch('/chat?stream=true', {
             method: 'POST',
-            headers: { 
+            credentials: 'include',
+            headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
             },
             body: JSON.stringify({ message, chatId, tutorMode: isTutorModeOn }),
-            credentials: 'include',
         });
 
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-
+        if (response.status === 401) { window.location.href = '/login'; return null; }
         if (response.status === 429) {
             const { retryAfter } = await response.json();
             displayRateLimitMessage(retryAfter);
@@ -172,17 +168,18 @@ async function sendMessage(message) {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
+        if (!response.ok)            { throw new Error(`HTTP ${response.status}`); }
 
-        const data = await response.json();
-
-        if (data.chatId) {
-            chatId = data.chatId;
+        // sync chatId from response header (case-insensitive)
+        const newId = response.headers.get('X-Chat-Id') || response.headers.get('x-chat-id');
+        if (newId) {
+            chatId = newId;
             sessionStorage.setItem('chatId', chatId);
         }
 
-        return data.response;
-    } catch (error) {
-        console.error('Error sending message:', error);
+        return response.body;            // <── ReadableStream
+    } catch (err) {
+        console.error('Error in sendMessage:', err);
         return null;
     }
 }
@@ -264,123 +261,91 @@ async function loadChatHistory() {
             window.location.href = '/login';
             return;
         }
-
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
         const chats = await res.json();
-
         highlightActiveChat();
 
-        // Clear the existing chat history list
+        /* rebuild the sidebar list */
         chatHistoryList.innerHTML = '';
 
-        // Define the category order
-        const orderedCategories = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
+        const orderedCategories   = ['Today', 'Yesterday', 'Previous 7 Days', 'Previous 30 Days'];
+        const availableCategories = orderedCategories.filter(c => chats[c]);
 
-        // Filter only the categories present in the fetched chats
-        const availableCategories = orderedCategories.filter(category => chats[category]);
-
-        // Loop through the categories and render the chat items
         for (const category of availableCategories) {
-            // Create and append category heading
             const categoryItem = document.createElement('li');
             categoryItem.textContent = category;
             categoryItem.classList.add('chat-category-list');
             chatHistoryList.appendChild(categoryItem);
-        
+
             const chatItems = document.createElement('ul');
-            
-            // Sort each category's array by timestamp descending
             chats[category].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
+
             for (const chat of chats[category]) {
-                // Create the chat item container
                 const chatItem = document.createElement('li');
                 chatItem.dataset.chatId = chat.chatId;
                 chatItem.classList.add('chat-item');
                 chatItem.setAttribute('role', 'group');
                 chatItem.setAttribute('aria-label', `Chat item for ${sanitizeText(chat.title)}`);
-        
-                // Instead of alt, use "title" here:
-                chatItem.setAttribute('title', chat.title); 
-        
-                // Add click event listener to load chat
+                chatItem.setAttribute('title', chat.title);
+
                 chatItem.addEventListener('click', () => loadChat(chat.chatId));
-        
                 chatItem.addEventListener('click', () => {
-                    // First remove the active class from any currently active items
-                    document.querySelectorAll('.chat-item.active').forEach(item => {
-                        item.classList.remove('active');
-                    });
-                    
-                    // Then add active class to this one
+                    document.querySelectorAll('.chat-item.active')
+                            .forEach(item => item.classList.remove('active'));
                     chatItem.classList.add('active');
-                    
-                    // Finally, load the selected chat
                     loadChat(chat.chatId);
                 });
-        
-                // Add focus and blur event listeners for active state
                 chatItem.addEventListener('focus', () => chatItem.classList.add('active'));
-                chatItem.addEventListener('blur', () => chatItem.classList.remove('active'));
-        
-                // Create and sanitize the chat title
+                chatItem.addEventListener('blur',  () => chatItem.classList.remove('active'));
+
                 const chatTitle = document.createElement('span');
                 chatTitle.textContent = sanitizeText(chat.title);
                 chatTitle.classList.add('chat-title');
                 chatTitle.setAttribute('tabindex', '0');
                 chatTitle.setAttribute('role', 'button');
                 chatTitle.setAttribute('aria-label', `Chat titled ${sanitizeText(chat.title)}`);
-        
-                // Attach input validation logic to the chat title
+
                 chatTitle.addEventListener('input', () => validateChatTitle(chatTitle));
-        
-                // Add click event listener to load chat
                 chatTitle.addEventListener('click', () => loadChat(chat.chatId));
-        
-                // Add keyboard event listener for Enter and Space keys
-                chatTitle.addEventListener('keydown', async function (event) {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
+                chatTitle.addEventListener('keydown', async e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
                         await loadChat(chat.chatId);
                     }
                 });
-        
-                // Create delete button
-                const binIconButton = document.createElement('button');
-                binIconButton.classList.add('bin-icon-button');
-                binIconButton.setAttribute('aria-label', `Delete chat titled ${sanitizeText(chat.title)}`);
-        
+
+                const binBtn  = document.createElement('button');
+                binBtn.classList.add('bin-icon-button');
+                binBtn.setAttribute('aria-label', `Delete chat titled ${sanitizeText(chat.title)}`);
+
                 const binIcon = document.createElement('i');
                 binIcon.classList.add('fas', 'fa-trash', 'bin-icon');
-                binIconButton.appendChild(binIcon);
-        
-                // Add click event to delete the chat
-                binIconButton.addEventListener('click', (e) => {
+                binBtn.appendChild(binIcon);
+                binBtn.addEventListener('click', e => {
                     e.stopPropagation();
                     deleteChat(chat.chatId);
                 });
-        
-                // Append the chat title and delete button to the chat item
+
                 chatItem.appendChild(chatTitle);
-                chatItem.appendChild(binIconButton);
-        
-                // Handle visibility
+                chatItem.appendChild(binBtn);
+
                 if (chat.visibility !== 1 && chat.visibility !== undefined) {
                     chatItem.style.display = 'none';
                 }
-        
                 chatItems.appendChild(chatItem);
             }
-        
             chatHistoryList.appendChild(chatItems);
         }
-    } catch (error) {
-        console.error('Error loading chat history:', error);
+
+        /* always start the sidebar at the top after a rebuild */
+        document.getElementById('sidebar').scrollTop = 0;
+
+    } catch (err) {
+        console.error('Error loading chat history:', err);
     }
 }
+
 
 // Helper function to sanitize chat titles
 function sanitizeText(text) {
@@ -449,40 +414,40 @@ async function loadChat(chatIdToLoad) {
     chatId = chatIdToLoad;
     sessionStorage.setItem('chatId', chatId);
 
-    // Fetch the chat object
-    const res = await fetch(`/chats/${chatId}`);
+    /* ── Fetch the chat object ─────────────────────────────── */
+    const res  = await fetch(`/chats/${chatId}`);
     const chat = await res.json();
 
-    // Clear the chat box
+    /* ── Clear the chat box ────────────────────────────────── */
     chatBox.innerHTML = '';
 
-    // If no messages, show welcome
+    /* ── No messages? Show welcome – then scroll bottom ───── */
     if (!chat.messages || chat.messages.length === 0) {
         showWelcomeScreen();
+        requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
         return;
     } else {
         hideWelcomeScreen();
     }
 
-    // Suppose the server or session sets which files are still in memory:
+    /* ── Files that are still cached on the server ─────────── */
     const inSessionList = chat.stillInSessionFiles || [];
 
-    // Render each message
+    /* ── Render each message/file card ─────────────────────── */
     chat.messages.forEach(msg => {
         if (msg.type === 'file-upload' && msg.fileName) {
-            // Show a “file card”
-            const fileName = msg.fileName;
+            const fileName    = msg.fileName;
             const isAvailable = inSessionList.includes(fileName);
             appendFileLink(fileName, '#', isAvailable);
         } else {
-            // Normal text message
             const senderName = (msg.role === 'user') ? 'You' : 'AI';
             appendMessage(senderName, msg.content);
         }
     });
 
-    // Focus the input at the end
+    /* ── Focus input & jump to page bottom ─────────────────── */
     chatInput.focus();
+    requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
 }
 
 newChatBtn.addEventListener('click', async () => {
@@ -776,6 +741,7 @@ function appendMessage(sender, message, imageFile = null, isLoading = false) {
 
     // Always scroll chat box to bottom
     chatBox.scrollTop = chatBox.scrollHeight;
+    window.scrollTo(0, document.body.scrollHeight);
 
     // Auto-scroll entire page if the sender is 'You'
     if (sender === "You") {
@@ -907,25 +873,24 @@ fileUpload.addEventListener('change', async function () {
 function appendFileLink(fileName, fileUrl, isDocumentAvailable = true) {
     const chatBox = document.getElementById('chat-box');
 
-    // Create a container for the file link
-    const fileElement = document.createElement('div');
+    /* ── build the DOM exactly as before ───────────────────── */
+    const fileElement  = document.createElement('div');
     fileElement.classList.add('file-upload-container', 'user');
 
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
 
-    // Decide icon
-    const fileIconLink = document.createElement('a');
+    const fileIconLink  = document.createElement('a');
     fileIconLink.classList.add('file-link');
 
-    const fileIcon = document.createElement('span');
+    const fileIcon      = document.createElement('span');
     fileIcon.classList.add('material-symbols-rounded', 'file-icon');
 
-    const fileNameSpan = document.createElement('span');
+    const fileNameSpan  = document.createElement('span');
     fileNameSpan.classList.add('file-name');
 
     if (!isDocumentAvailable) {
-        // --- UNAVAILABLE DOC ---
+        /* unavailable document – greyed-out link */
         fileIcon.textContent = 'insert_drive_file';
         fileIcon.classList.add('grey-file-icon');
         fileNameSpan.textContent = 'document is no longer available';
@@ -933,114 +898,102 @@ function appendFileLink(fileName, fileUrl, isDocumentAvailable = true) {
 
         fileIconLink.href = '#';
         fileIconLink.style.cursor = 'default';
-
-        // Add icon + text to the link
         fileIconLink.appendChild(fileIcon);
         fileIconLink.appendChild(fileNameSpan);
-
-        // Put the link into the container
         messageContent.appendChild(fileIconLink);
-
     } else {
-        // --- AVAILABLE DOC ---
+        /* normal link + optional delete button */
         fileIcon.textContent = 'insert_drive_file';
-        fileIcon.classList.remove('grey-file-icon');
         fileNameSpan.textContent = fileName;
-        fileNameSpan.classList.remove('file-name-disabled');
 
         if (fileUrl && fileUrl !== '#') {
-            fileIconLink.href = fileUrl;
+            fileIconLink.href   = fileUrl;
             fileIconLink.target = '_blank';
         }
 
-        // Build the file link first
         fileIconLink.appendChild(fileIcon);
         fileIconLink.appendChild(fileNameSpan);
         messageContent.appendChild(fileIconLink);
 
-        // Create the delete (bin) button, appended AFTER the link
         const deleteButton = document.createElement('span');
         deleteButton.classList.add('material-symbols-rounded', 'delete-button');
         deleteButton.textContent = 'delete';
-
         deleteButton.addEventListener('click', async () => {
             try {
-                const encodedFileName = encodeURIComponent(fileName);
-                const resp = await fetch(`/chats/${chatId}/files/${encodedFileName}`, {
-                    method: 'DELETE',
-                });
-
+                const encoded = encodeURIComponent(fileName);
+                const resp    = await fetch(`/chats/${chatId}/files/${encoded}`, { method: 'DELETE' });
                 if (!resp.ok) {
                     const err = await resp.json();
                     displayPopup(`Error removing file: ${err.error || resp.statusText}`);
                 } else {
-                    // Remove from DOM
                     chatBox.removeChild(fileElement);
                 }
             } catch (err) {
                 displayPopup(`Error deleting file: ${err}`);
             }
         });
-
         messageContent.appendChild(deleteButton);
     }
 
     fileElement.appendChild(messageContent);
     chatBox.appendChild(fileElement);
 
-    // Scroll to the bottom to reveal the newly added file
+    /* ── NEW: keep both the inner box *and* the page bottom-aligned ── */
     chatBox.scrollTop = chatBox.scrollHeight;
+    requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
 }
 
 
 const sidebar = document.getElementById('sidebar');
 
 function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const chatBox = document.getElementById('chat-box');
-    const collapseBtn = document.getElementById('collapse-btn');
-    const newChatBtn = document.getElementById('new-chat-btn');
-    const attachIcon = document.getElementById('attach-icon');
-    const chatWindow = document.querySelector('.chat-window');
-    const iconContainer = document.querySelector('.icon-container');
+    const sidebar        = document.getElementById('sidebar');
+    const chatBox        = document.getElementById('chat-box');
+    const collapseBtn    = document.getElementById('collapse-btn');
+    const newChatBtn     = document.getElementById('new-chat-btn');
+    const attachIcon     = document.getElementById('attach-icon');
+    const chatWindow     = document.querySelector('.chat-window');
+    const iconContainer  = document.querySelector('.icon-container');
     const inputContainer = document.querySelector('.input-container');
-    const inputBackground = document.querySelector('.input-background');
+    const inputBg        = document.querySelector('.input-background');
 
     if (sidebar.classList.contains('collapsed')) {
+        /* —— EXPAND —— */
         sidebar.classList.remove('collapsed');
         chatBox.classList.remove('collapsed');
-        collapseBtn.textContent = 'left_panel_close';
         chatWindow.classList.remove('collapsed');
         inputContainer.classList.remove('collapsed');
         iconContainer.classList.remove('collapsed');
-        inputBackground.classList.remove('collapsed');
+        inputBg.classList.remove('collapsed');
 
-        document.body.classList.remove('no-chat-scroll');
+        /* after the width change is applied, jump to the very top */
+        requestAnimationFrame(() => { sidebar.scrollTop = 0; });
 
+        collapseBtn.textContent = 'left_panel_close';
         collapseBtn.classList.add('active');
         newChatBtn.classList.add('active');
         attachIcon.classList.add('active');
         iconContainer.classList.add('active');
-        inputBackground.classList.add('active');
+        inputBg.classList.add('active');
     } else {
+        /* —— COLLAPSE —— */
         sidebar.classList.add('collapsed');
         chatBox.classList.add('collapsed');
-        collapseBtn.textContent = 'left_panel_open';
         chatWindow.classList.add('collapsed');
         inputContainer.classList.add('collapsed');
         iconContainer.classList.add('collapsed');
-        inputBackground.classList.add('collapsed');
+        inputBg.classList.add('collapsed');
 
-        document.body.classList.add('no-chat-scroll');
-
+        collapseBtn.textContent = 'left_panel_open';
         collapseBtn.classList.remove('active');
         newChatBtn.classList.remove('active');
         attachIcon.classList.remove('active');
         iconContainer.classList.remove('active');
 
-        window.scrollTo(0, document.body.scrollHeight);
+        /* removed: no more page-scroll-to-bottom here */
     }
 }
+
 
 function initializeActiveState() {
     const sidebar = document.getElementById('sidebar');
@@ -1254,55 +1207,80 @@ function streamMessageFromServer() {
     };
 }
 
-function streamParsedResponse(messageContent, rawResponseText) {
-    // Remove any loading dots if present
+function streamParsedResponse(messageContent, source) {
     const messageBody = messageContent.querySelector('.message-body');
-    if (!messageBody) {
-        console.error("Message body not found.");
-        return;
-    }
 
+    // remove the three loading dots, if still present
     const loadingDots = messageBody.querySelector('.loading-dots');
-    if (loadingDots) {
-        loadingDots.remove();
-    }
+    if (loadingDots) loadingDots.remove();
 
-    // Create or select a messageText element to display the streaming text
+    /* ensure we have a <div.message-text> to write into */
     let messageText = messageBody.querySelector('.message-text');
     if (!messageText) {
-        messageText = document.createElement('div');
+        messageText      = document.createElement('div');
         messageText.classList.add('message-text');
         messageBody.appendChild(messageText);
     }
 
-    // We'll stream the text as plain text first, then do a final parse at the end
-    messageText.textContent = '';
+    /* ─── 1.  TRUE STREAMING BRANCH (ReadableStream) ─── */
+    if (source && typeof source.getReader === 'function') {
+        const reader  = source.getReader();
+        const decoder = new TextDecoder();
+        let fullText  = '';
 
-    const words = rawResponseText.split(/(\s+)/); 
-    let currentWordIndex = 0;
-    let accumulatedText = '';
+        (async () => {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;                         // stream closed by server
 
-    const intervalSpeed = 10;
-    const maxWordsPerChunk = 5;
+                const chunk = decoder.decode(value, { stream: true });
+                if (chunk.trim() === '[DONE]') break;    // end-token
 
-    const wordInterval = setInterval(() => {
-        if (currentWordIndex < words.length) {
-            // Append a few words each iteration for smoother streaming
-            const chunkEnd = Math.min(currentWordIndex + maxWordsPerChunk, words.length);
-            for (let i = currentWordIndex; i < chunkEnd; i++) {
-                accumulatedText += words[i];
+                fullText                += chunk;
+                messageText.textContent += chunk;
+
+                chatBox.scrollTop = chatBox.scrollHeight;
+                window.scrollTo(0, document.body.scrollHeight);
             }
-            currentWordIndex = chunkEnd;
 
-            // Update the textContent quickly (no markdown, just raw text now)
-            messageText.textContent = accumulatedText;
-            chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
-        } else {
-            clearInterval(wordInterval);
-            // Streaming done, now we do the final parsing & formatting
-            finalizeResponseFormatting(messageBody, accumulatedText);
-        }
-    }, intervalSpeed);
+            /*  finished – prettify, then refresh sidebar after a short pause  */
+            finalizeResponseFormatting(messageBody, fullText);
+
+            /*  wait ≈1 s so the server finishes title-generation & upsert  */
+            setTimeout(async () => {
+                try {
+                    await loadChatHistory();   // new title now in DB
+                    setActiveChat(chatId);
+                } catch (err) {
+                    console.error('streamParsedResponse → loadChatHistory failed', err);
+                }
+            }, 1100);        // tweak if your titles still lag
+
+        })();
+
+        return;   // nothing else to do
+    }
+
+    /* ─── 2.  LEGACY PSEUDO-STREAM BRANCH (whole string) ─── */
+    if (typeof source === 'string') {
+        const words         = source.split(/(\s+)/);
+        let idx             = 0;
+        let accumulated     = '';
+        const intervalSpeed = 10;   // ms
+        const wordsPerTick  = 5;
+
+        const id = setInterval(() => {
+            if (idx < words.length) {
+                accumulated += words.slice(idx, idx + wordsPerTick).join('');
+                idx         += wordsPerTick;
+                messageText.textContent = accumulated;
+                chatBox.scrollTop       = chatBox.scrollHeight;
+            } else {
+                clearInterval(id);
+                finalizeResponseFormatting(messageBody, accumulated);
+            }
+        }, intervalSpeed);
+    }
 }
 
 function finalizeResponseFormatting(messageBody, rawResponseText) {
@@ -1354,6 +1332,7 @@ function finalizeResponseFormatting(messageBody, rawResponseText) {
             .catch(err => console.error("MathJax rendering failed:", err));
     }
     chatBox.scrollTop = chatBox.scrollHeight;
+    window.scrollTo(0, document.body.scrollHeight);
 }
 
 

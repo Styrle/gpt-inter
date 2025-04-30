@@ -18,6 +18,7 @@ const helmet = require('helmet');
 const textract = require('textract');
 const { htmlToText } = require('html-to-text');
 const mime = require('mime-types');
+const crypto = require('crypto');
 const removeMarkdown = require('remove-markdown');
 
 // Lazy load node-fetch to avoid runtime overhead if not used
@@ -29,7 +30,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const app = express();
 const port = 8080;
 const isDevelopment = process.env.NODE_ENV === 'development';
-const retentionDays = Number(process.env.DELETE_CHAT_HISTORY) || 90;
+const retentionDays = 90;
 const NINETY_DAYS_IN_MS = retentionDays * 24 * 60 * 60 * 1000;
 
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT;
@@ -162,7 +163,7 @@ async function ensureAuthenticated(req, res, next) {
             // In development mode, simulate authentication
             req.user = {
                 email: 'JSerpis@delta.kaplaninc.com',
-                name: 'Josh Serpis',
+                name: 'Anon',
                 userRoles: ['authenticated'],
             };
             return next();
@@ -185,7 +186,7 @@ if (isDevelopment) {
         } else {
             req.user = {
                 email: 'JSerpis@delta.kaplaninc.com',
-                name: 'Josh Serpis',
+                name: 'Anon',
                 userRoles: ['authenticated'],
             };
             req.session.user = req.user;
@@ -206,6 +207,29 @@ if (isDevelopment) {
 async function getChatHistory(chatId) {
     try {
         const { resource: chat } = await container.item(chatId, chatId).read();
+        if (!chat) return null;
+
+        // Decrypt message content here
+        if (chat.messages && Array.isArray(chat.messages)) {
+            for (const message of chat.messages) {
+                // Check if message.content has an IV + encrypted data
+                if (
+                    message.content &&
+                    typeof message.content === 'object' &&
+                    message.content.iv &&
+                    message.content.encrypted
+                ) {
+                    const ivBuffer = Buffer.from(message.content.iv, 'hex');
+                    const keyBuffer = Buffer.from(process.env.CONTENT_ENCRYPTION_KEY, 'hex');
+
+                    const decipher = crypto.createDecipheriv('aes-256-cbc', keyBuffer, ivBuffer);
+                    let decrypted = decipher.update(message.content.encrypted, 'hex', 'utf8');
+                    decrypted += decipher.final('utf8');
+                    message.content = decrypted;
+                }
+            }
+        }
+
         return chat;
     } catch (error) {
         if (error.code === 404) return null;
@@ -215,6 +239,27 @@ async function getChatHistory(chatId) {
 
 async function upsertChatHistory(chat) {
     try {
+        // Encrypt message content before saving to Cosmos DB
+        if (chat.messages && Array.isArray(chat.messages)) {
+            for (const message of chat.messages) {
+                // Only encrypt if content is a plain string
+                if (message.content && typeof message.content === 'string') {
+                    const iv = crypto.randomBytes(16);
+                    const keyBuffer = Buffer.from(process.env.CONTENT_ENCRYPTION_KEY, 'hex');
+
+                    const cipher = crypto.createCipheriv('aes-256-cbc', keyBuffer, iv);
+                    let encrypted = cipher.update(message.content, 'utf8', 'hex');
+                    encrypted += cipher.final('hex');
+
+                    // Replace the raw string with an object holding IV + ciphertext
+                    message.content = {
+                        iv: iv.toString('hex'),
+                        encrypted,
+                    };
+                }
+            }
+        }
+
         await container.items.upsert(chat, { partitionKey: chat.id });
     } catch (error) {
         console.error('Error upserting chat history:', error);
@@ -380,8 +425,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 title: 'File Upload',
                 messages: [],
                 timestamp: new Date().toISOString(),
+        
+                /* stats for documents */
                 total_document_count: 0,
-                total_document_size: 0
+                total_document_size: 0,
+        
+                /*  NEW – initialise token stats so they’re never null  */
+                total_tokens_used: 0,
+                total_interactions: 0,
+                average_tokens_per_interaction: 0,
             };
         }
 
@@ -416,6 +468,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
 app.post('/chat', upload.array('image'), async (req, res) => {
     const { message, tutorMode, chatId: providedChatId } = req.body;
+    const wantsStream = req.query.stream === 'true';   
     const userId = req.user && req.user.email ? req.user.email : 'anonymous';
 
     console.log(`[POST /chat] Received body:`, JSON.stringify(req.body, null, 2));
@@ -469,7 +522,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
         role: 'system',
         content: tutorMode
             ? 'You are an AI tutor. Please provide step-by-step explanations as if teaching the user.'
-            : SYSTEM_PROMPT.replace('{CURRENT_DATE}', currentDate),
+            : "You are KaplanGPT, an assistant at Kaplan UK, a company providing apprenticeships and professional qualification in accounting & tax as well as data and IT. \n\nYour job is to help Kaplan staff members do their jobs. The staff work in the production and delivery of Kaplan's educational products. You may talk freely about topics that a user wants to discuss. You will be provided with data, documents and Kaplan's IP that you should converse freely about to the user.\n\nAs well as providing information about Kaplan, you will also assist with summarising; rewriting; checking spelling, grammar and tone of voice; helping to write materials; writing, checking and helping to refactor code; managing staff members; analysing documents and providing details contained within them; day-to-day admin tasks; as well as any other tasks that help staff at Kaplan perform their roles.\n\nIf a user provides you with a source of content and queries it, you must limit your answer to information contained within that content unless specifically asked otherwise.\n\nYou must not answer any questions on material produced by Tolley that a user adds as a prompt. If there is evidence to suggest the content you are provided with is produced by Tolley, you must let the user know you are not able to answer questions on Tolley material as requested by Tolley. You may answer general questions about Tolley as a business.\n\nYou have a friendly and professional manner and will always use British English. You must also use British as the default setting for other things such as when asked about law, regulations, standards or popular culture unless explicitly asked otherwise by the user. \n\n Remembers all previous interactions in this chat and can recall them when asked.\n Today's date is",
         timestamp: new Date().toISOString(),
     };
     messages.unshift(systemMessage);
@@ -536,13 +589,172 @@ app.post('/chat', upload.array('image'), async (req, res) => {
 
     // Prepare the Azure OpenAI request payload
     const payload = {
-        model: 'gpt-4o', // Check your actual model name
-        messages: messages,
+        model: 'gpt-4o',
+        messages,
         temperature: 0.7,
-        max_tokens: 2048
+        max_tokens: 2048,
+        stream: wantsStream
     };
 
-    console.log('[POST /chat] Payload to Azure:', JSON.stringify(payload, null, 2));
+    const safePayload = JSON.parse(JSON.stringify(payload));
+        safePayload.messages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+                msg.content.forEach(part => {
+                    if (
+                        part.type === 'image_url' &&
+                        part.image_url &&
+                        typeof part.image_url.url === 'string' &&
+                        part.image_url.url.startsWith('data:image/')
+                    ) {
+                        const approxKB = Math.round(
+                            (part.image_url.url.length * 3 / 4) / 1024
+                        );
+                        part.image_url.url = `[base-64 image (${approxKB} KB) removed]`;
+                    }
+                });
+            }
+        });
+        console.log('[POST /chat] Payload to Azure (images redacted):',
+                    JSON.stringify(safePayload, null, 2));
+
+    if (wantsStream) {
+        try {
+            const azureRes = await fetch(
+                `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'api-key': process.env.AZURE_OPENAI_API_KEY,
+                    },
+                    body: JSON.stringify(payload),
+                }
+            );
+
+            if (!azureRes.ok) {
+                const errTxt = await azureRes.text();
+                console.error('Azure returned error:', errTxt);
+                return res.status(azureRes.status).send(errTxt);
+            }
+
+            // Tell the browser we’ll push plaintext chunks
+                res.writeHead(200, {
+                   'Content-Type': 'text/plain; charset=utf-8',
+                   'Transfer-Encoding': 'chunked',
+                   'Cache-Control': 'no-cache',
+                   'X-Chat-Id': chatId,
+                   'Access-Control-Expose-Headers': 'X-Chat-Id'
+                 });
+                res.flushHeaders();  
+
+            let assembled = '';  // full assistant response we’ll save at the end
+
+            for await (const rawChunk of azureRes.body) {
+                const chunk = rawChunk.toString('utf8');
+
+                // Azure streams Server-Sent Events: lines starting with "data:"
+                for (const line of chunk.split('\n')) {
+                    if (!line.trim().startsWith('data:')) continue;
+                    const payloadStr = line.replace(/^data:\s*/, '').trim();
+
+                    // Stream finished
+                    if (payloadStr === '[DONE]') {
+                        res.write('[DONE]');
+                        res.end();
+                    
+                        /* ---------- helper to guesstimate token usage ----------- */
+                        function roughTokenCount(text = '') {
+                            // ~4 characters ≈ 1 token for English prose (OpenAI doc heuristic)
+                            return Math.ceil(text.length / 4);
+                        }
+                    
+                        /* ---------- 1. update user-message tokens --------------- */
+                        const userMsg   = userMessageObject;         // we pushed this earlier
+                        const promptTok = roughTokenCount(
+                            Array.isArray(userMsg.content)
+                                ? userMsg.content.map(c => c.text || '').join(' ')
+                                : userMsg.content || ''
+                        );
+                        userMsg.tokens  = promptTok;
+                    
+                        /* ---------- 2. store assistant turn --------------------- */
+                        const assistantTok = roughTokenCount(assembled);
+                        chat.messages.push({
+                            role: 'assistant',
+                            content: assembled,
+                            timestamp: new Date().toISOString(),
+                            tokens: assistantTok,
+                        });
+                    
+                        /* ---------- 3. stats ------------------------------------ */
+                        const newTokens = promptTok + assistantTok;
+                        chat.total_tokens_used += newTokens;
+                        chat.total_interactions += 2;                // user + assistant
+                        chat.average_tokens_per_interaction =
+                            chat.total_tokens_used / chat.total_interactions;
+                        chat.timestamp = new Date().toISOString();
+                    
+                        /* ---------- 4. generate title on first turn ------------- */
+                        if (isNewChat) {
+                            try {
+                                const titlePrompt = [
+                                    { role: 'system',
+                                      content: 'Generate a concise chat title (≤ 5 words, no quotes).' },
+                                    { role: 'user',   content: message || 'Generate a title.' },
+                                ];
+                                const titlePayload = { model: 'gpt-4o', messages: titlePrompt };
+                    
+                                const titleRes = await fetch(
+                                    `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=${process.env.AZURE_OPENAI_API_VERSION}`,
+                                    {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'api-key': process.env.AZURE_OPENAI_API_KEY,
+                                        },
+                                        body: JSON.stringify(titlePayload),
+                                    }
+                                );
+                                if (titleRes.ok) {
+                                    const titleData = await titleRes.json();
+                                    chat.title = titleData.choices?.[0]?.message?.content?.trim() || 'No Title';
+                                } else {
+                                    console.error('Title generation failed:', await titleRes.text());
+                                }
+                            } catch (err) {
+                                console.error('Title generation error:', err);
+                            }
+                        }
+                    
+                        /* ---------- 5. persist everything ----------------------- */
+                        await upsertChatHistory(chat);
+                    
+                        /* 5️⃣ DONE — stop the streaming branch; don’t fall through */
+                        return;
+                    }
+                    
+                    /* ==============================================================
+                       REGULAR DELTA CHUNK (unchanged)
+                       ============================================================== */
+                    try {
+                        const json  = JSON.parse(payloadStr);
+                        const delta = json.choices?.[0]?.delta?.content;
+                        if (delta) {
+                            assembled += delta;
+                            res.write(delta); // push to client
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse stream chunk:', e);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Streaming error:', err);
+            res.write('[DONE]');
+            res.end();
+        }
+        return; // don’t fall through to non-stream logic
+    }
 
     let aiResponse = '';
     let usage = {};
@@ -893,7 +1105,7 @@ setInterval(deleteOldChats, 24 * 60 * 60 * 1000);
 // Auth Routes
 if (isDevelopment) {
     app.get('/login', (req, res) => {
-        req.user = { userId: 'test-user-id', userDetails: 'Josh Serpis', userRoles: ['authenticated'] };
+        req.user = { userId: 'test-user-id', userDetails: 'Anon', userRoles: ['authenticated'] };
         res.redirect('/');
     });
 
