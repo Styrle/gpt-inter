@@ -659,7 +659,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
 
                     // Stream finished
                     if (payloadStr === '[DONE]') {
-                        res.write('[DONE]');
+                        // Don't send [DONE] to the client directly
                         res.end();
                     
                         /* ---------- helper to guesstimate token usage ----------- */
@@ -733,7 +733,7 @@ app.post('/chat', upload.array('image'), async (req, res) => {
                         return;
                     }
                     
-                    /* ==============================================================
+                    /* ============================================================== 
                        REGULAR DELTA CHUNK (unchanged)
                        ============================================================== */
                     try {
@@ -750,7 +750,6 @@ app.post('/chat', upload.array('image'), async (req, res) => {
             }
         } catch (err) {
             console.error('Streaming error:', err);
-            res.write('[DONE]');
             res.end();
         }
         return; // don’t fall through to non-stream logic

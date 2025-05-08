@@ -134,10 +134,9 @@ body.no-chat-scroll .chat-window {
     position: relative;
     flex-direction: column;
     padding: 20px;
-    max-width: 1200px;
-    margin-left: var(--sidebar-width);   /* pushes the content over */
+    max-width: calc(60vw);
+    margin: 0 auto;
     transition: margin var(--transition-duration) ease;
-    margin-right: auto;
 
     /* page handles scrolling now */
     overflow: visible;          /* was: hidden */
@@ -1076,6 +1075,11 @@ pre code.hljs {
 ======================================= */
 
 @media (max-width: 1100px) {
+    .chat-window {
+        max-width: calc(60vw);
+        margin: 0px 0px 0px auto;
+        transition: margin var(--transition-duration) ease;
+    }
     .chat-window.collapsed {
         max-width: calc(60vw);
         margin: 0px 0px 0px auto;
@@ -1102,6 +1106,12 @@ pre code.hljs {
         left: 0;
         background-color: var(--color-light);
         transition: all var(--transition-duration) ease-in-out;
+    }
+
+    .chat-window {
+        max-width: 100%;
+        margin: 0px 0px 0px auto;
+        transition: margin var(--transition-duration) ease;
     }
 
     .chat-window.collapsed {
