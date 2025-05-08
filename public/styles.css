@@ -258,6 +258,8 @@ body.no-chat-scroll .chat-window {
     font-family: var(--font-family-main);
     font-size: 1rem;
     line-height: 1.4;
+    min-height: 50px;
+    align-content: center;
     height: 50%;       
     max-height: 25vh;
     overflow: hidden;
