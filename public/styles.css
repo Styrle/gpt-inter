@@ -291,13 +291,10 @@ body.no-chat-scroll .chat-window {
 ======================================= */
 
 .sidebar{
-    /* NEW – anchor the bar to the viewport itself                 */
-    position: fixed;          /* was: (none)                      */
-    top: 0;                   /* flush with the top edge          */
+    position: flex;         
+    top: 0;                 
     left: 0;
-
-    /* keep everything you already liked                           */
-    height: 100vh;            /* fill the whole height            */
+    height: 100vh;         
     width: var(--sidebar-width);
     background-color: var(--color-sidebar-bg);
     transition: width var(--transition-duration) ease;
@@ -305,7 +302,6 @@ body.no-chat-scroll .chat-window {
     flex-direction: column;
     z-index: var(--z-sidebar);
 
-    /* leave room for the fixed icon bar that sits ON the sidebar  */
     padding-top: calc(var(--icon-size) + 24px);
     overflow-y: auto;
 }
@@ -1137,7 +1133,7 @@ pre code.hljs {
 
     /* Make sidebar overlay the chat on mobile */
     .sidebar {
-        position: fixed;
+        position: flex;
         top: 0;
         left: 0;
         height: 100%;
